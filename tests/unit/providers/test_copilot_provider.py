@@ -164,6 +164,28 @@ def test_get_chat_model_instance_uses_auth_transport() -> None:
     http_client = model.client._client  # AsyncOpenAI underlying httpx client
     assert isinstance(http_client._transport, _CopilotAuthTransport)
 
+def test_update_config_invalidates_token_on_key_change() -> None:
+    provider = _make_provider(api_key="gho_old")
+    provider._copilot_token = "cached"
+    provider._copilot_token_expires_at = time.time() + 1800
+
+    provider.update_config({"api_key": "gho_new"})
+
+    assert provider.api_key == "gho_new"
+    assert provider._copilot_token is None
+    assert provider._copilot_token_expires_at == 0.0
+
+
+def test_update_config_keeps_token_when_key_unchanged() -> None:
+    provider = _make_provider(api_key="gho_same")
+    provider._copilot_token = "cached"
+    provider._copilot_token_expires_at = time.time() + 1800
+
+    provider.update_config({"api_key": "gho_same", "name": "Renamed"})
+
+    assert provider._copilot_token == "cached"
+
+
 def test_github_copilot_provider_registered() -> None:
     from qwenpaw.providers.provider_manager import ProviderManager
 

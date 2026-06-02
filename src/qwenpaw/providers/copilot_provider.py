@@ -99,6 +99,21 @@ class CopilotProvider(Provider):
             self._refresh_lock = asyncio.Lock()
         return self._refresh_lock
 
+    def update_config(self, config: dict) -> None:
+        """Invalidate the cached session token when the GitHub token changes.
+
+        The short-lived Copilot session token is derived from ``api_key`` (the
+        long-lived ``gho_`` token). If the user re-authenticates with a
+        different GitHub account, the previously cached session token would
+        otherwise remain valid for up to ~25 minutes and keep serving the old
+        account, so it must be dropped whenever ``api_key`` is updated.
+        """
+        new_key = config.get("api_key")
+        if new_key is not None and str(new_key).strip() != self.api_key:
+            self._copilot_token = None
+            self._copilot_token_expires_at = 0.0
+        super().update_config(config)
+
     async def _get_copilot_token(self) -> str:
         """Return a valid Copilot session token, refreshing if needed.
 
