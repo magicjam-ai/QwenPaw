@@ -9,6 +9,7 @@ and used as a Bearer token against the OpenAI-compatible Copilot API.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from typing import List
@@ -19,6 +20,8 @@ from openai import APIError, AsyncOpenAI
 from agentscope.model import ChatModelBase
 
 from .provider import ModelInfo, Provider
+
+logger = logging.getLogger(__name__)
 
 # --- Copilot endpoints / constants (see decolua/9router for provenance) -------
 COPILOT_API_BASE_URL = "https://api.githubcopilot.com"
@@ -33,6 +36,26 @@ _GITHUB_API_VERSION = "2025-04-01"
 
 # Refresh the Copilot token this many seconds before its stated expiry.
 _TOKEN_SAFETY_MARGIN = 120
+
+
+def _api_error_detail(exc: APIError) -> str:
+    """Best-effort human-readable reason from an OpenAI/Copilot ``APIError``.
+
+    Copilot returns structured errors such as
+    ``{"error": {"message": "You have exceeded your monthly quota", ...}}``.
+    Surfacing that message instead of a generic "API error" lets the UI show
+    actionable causes (quota exhaustion, auth failures, bad model id) rather
+    than hiding them behind an opaque string.
+    """
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict) and err.get("message"):
+            return str(err["message"])
+        if isinstance(err, str) and err:
+            return err
+    message = getattr(exc, "message", None)
+    return str(message) if message else str(exc)
 
 
 def _copilot_chat_headers() -> dict:
@@ -182,8 +205,8 @@ class CopilotProvider(Provider):
             return True, ""
         except PermissionError as e:
             return False, str(e)
-        except APIError:
-            return False, f"API error when connecting to `{self.base_url}`"
+        except APIError as exc:
+            return False, _api_error_detail(exc)
         except Exception:
             return (
                 False,
@@ -208,7 +231,16 @@ class CopilotProvider(Provider):
                     )
                 )
             return models
+        except APIError as exc:
+            logger.warning(
+                "GitHub Copilot model discovery failed: %s",
+                _api_error_detail(exc),
+            )
+            return []
         except Exception:
+            logger.warning(
+                "GitHub Copilot model discovery failed", exc_info=True
+            )
             return []
 
     async def check_model_connection(
@@ -236,8 +268,8 @@ class CopilotProvider(Provider):
             return True, ""
         except PermissionError as e:
             return False, str(e)
-        except APIError:
-            return False, f"API error when connecting to model '{model_id}'"
+        except APIError as exc:
+            return False, _api_error_detail(exc)
         except Exception:
             return (
                 False,

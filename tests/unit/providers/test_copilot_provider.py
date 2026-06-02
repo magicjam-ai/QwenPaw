@@ -162,6 +162,47 @@ async def test_check_connection_sends_session_token_as_api_key(monkeypatch) -> N
     assert captured["api_key"] == "copilot-session-xyz"
 
 
+async def test_check_connection_surfaces_api_error_message(monkeypatch) -> None:
+    """A Copilot API error (e.g. quota) must surface its real reason.
+
+    The handler previously collapsed every ``APIError`` into a generic
+    "API error when connecting to ...", hiding actionable causes such as
+    ``"You have exceeded your monthly quota"``.
+    """
+    import qwenpaw.providers.copilot_provider as mod
+    from openai import APIError
+
+    provider = _make_provider()
+
+    async def fake_token(self):  # noqa: ANN001
+        return "copilot-abc"
+
+    class FakeModels:
+        async def list(self, timeout=None):
+            raise APIError(
+                "Error code: 402",
+                httpx.Request("GET", f"{COPILOT_API_BASE_URL}/models"),
+                body={
+                    "error": {
+                        "message": "You have exceeded your monthly quota",
+                        "code": "quota_exceeded",
+                    }
+                },
+            )
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(CopilotProvider, "_get_copilot_token", fake_token)
+    monkeypatch.setattr(mod, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    ok, msg = await provider.check_connection(timeout=2.0)
+
+    assert ok is False
+    assert msg == "You have exceeded your monthly quota"
+
+
 async def test_auth_transport_injects_fresh_bearer(monkeypatch) -> None:
     from qwenpaw.providers.copilot_provider import _CopilotAuthTransport
 
