@@ -163,3 +163,15 @@ def test_get_chat_model_instance_uses_auth_transport() -> None:
 
     http_client = model.client._client  # AsyncOpenAI underlying httpx client
     assert isinstance(http_client._transport, _CopilotAuthTransport)
+
+def test_github_copilot_provider_registered() -> None:
+    from qwenpaw.providers.provider_manager import ProviderManager
+
+    manager = ProviderManager()
+    provider = manager.get_provider("github-copilot")
+
+    assert provider is not None
+    assert provider.id == "github-copilot"
+    assert provider.auth_mode == "auth_token"
+    assert provider.support_model_discovery is True
+    assert provider.meta.get("auth_flow") == "github-device-code"
