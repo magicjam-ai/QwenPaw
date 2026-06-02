@@ -158,30 +158,26 @@ class CopilotProvider(Provider):
             self._copilot_token_expires_at = float(data["expires_at"])
             return self._copilot_token
 
-    async def _build_headers(self) -> dict:
-        token = await self._get_copilot_token()
-        headers = _copilot_chat_headers()
-        if self.custom_headers:
-            headers.update(self.custom_headers)
-        # Bearer is supplied via AsyncOpenAI api_key; return the rest here.
-        self._auth_token = token  # used by _client
-        return headers
+    def _client(self, token: str, timeout: float = 5) -> AsyncOpenAI:
+        """Build an OpenAI-compatible client bound to a Copilot session token.
 
-    def _client(self, timeout: float = 5) -> AsyncOpenAI:
-        # NOTE: callers must have awaited _build_headers() to populate the
-        # token; in practice _client is always preceded by token retrieval in
-        # the methods below.
+        ``token`` must be a freshly retrieved Copilot session token (see
+        :meth:`_get_copilot_token`); it is sent as the bearer credential. The
+        Copilot API rejects requests with a missing/empty ``Authorization``
+        header, so callers must pass the live token rather than relying on any
+        cached instance state.
+        """
         return AsyncOpenAI(
             base_url=self.base_url,
-            api_key=getattr(self, "_auth_token", "") or "",
+            api_key=token or "",
             timeout=timeout,
             default_headers=_copilot_chat_headers(),
         )
 
     async def check_connection(self, timeout: float = 5) -> tuple[bool, str]:
         try:
-            await self._get_copilot_token()
-            client = self._client(timeout=timeout)
+            token = await self._get_copilot_token()
+            client = self._client(token, timeout=timeout)
             await client.models.list(timeout=timeout)
             return True, ""
         except PermissionError as e:
@@ -196,8 +192,8 @@ class CopilotProvider(Provider):
 
     async def fetch_models(self, timeout: float = 5) -> List[ModelInfo]:
         try:
-            await self._get_copilot_token()
-            client = self._client(timeout=timeout)
+            token = await self._get_copilot_token()
+            client = self._client(token, timeout=timeout)
             payload = await client.models.list(timeout=timeout)
             models: List[ModelInfo] = []
             for item in getattr(payload, "data", []) or []:
@@ -224,8 +220,8 @@ class CopilotProvider(Provider):
         if not model_id:
             return False, "Empty model ID"
         try:
-            await self._get_copilot_token()
-            client = self._client(timeout=timeout)
+            token = await self._get_copilot_token()
+            client = self._client(token, timeout=timeout)
             res = await client.chat.completions.create(
                 model=model_id,
                 messages=[

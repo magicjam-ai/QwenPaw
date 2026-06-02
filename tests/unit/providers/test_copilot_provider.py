@@ -89,7 +89,9 @@ async def test_check_connection_uses_models_endpoint(monkeypatch) -> None:
 
     monkeypatch.setattr(CopilotProvider, "_get_copilot_token", fake_token)
     monkeypatch.setattr(
-        provider, "_client", lambda timeout=5: SimpleNamespace(models=FakeModels())
+        provider,
+        "_client",
+        lambda token, timeout=5: SimpleNamespace(models=FakeModels()),
     )
 
     ok, msg = await provider.check_connection(timeout=2.0)
@@ -115,12 +117,49 @@ async def test_fetch_models_maps_payload(monkeypatch) -> None:
 
     monkeypatch.setattr(CopilotProvider, "_get_copilot_token", fake_token)
     monkeypatch.setattr(
-        provider, "_client", lambda timeout=5: SimpleNamespace(models=FakeModels())
+        provider,
+        "_client",
+        lambda token, timeout=5: SimpleNamespace(models=FakeModels()),
     )
 
     models = await provider.fetch_models(timeout=2.0)
 
     assert {m.id for m in models} == {"gpt-4o", "claude-3.7-sonnet"}
+
+
+async def test_check_connection_sends_session_token_as_api_key(monkeypatch) -> None:
+    """Regression: the OpenAI client must carry the Copilot session token.
+
+    Previously ``_client`` read a never-populated ``_auth_token`` attribute and
+    built ``AsyncOpenAI`` with an empty ``api_key``, so every connection check /
+    model discovery hit Copilot with no Authorization header and failed with
+    ``bad request: missing required Authorization header``.
+    """
+    import qwenpaw.providers.copilot_provider as mod
+
+    provider = _make_provider()
+    captured: dict = {}
+
+    async def fake_token(self):  # noqa: ANN001
+        return "copilot-session-xyz"
+
+    class FakeModels:
+        async def list(self, timeout=None):
+            return SimpleNamespace(data=[])
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.models = FakeModels()
+
+    monkeypatch.setattr(CopilotProvider, "_get_copilot_token", fake_token)
+    monkeypatch.setattr(mod, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    ok, msg = await provider.check_connection(timeout=2.0)
+
+    assert ok is True
+    assert msg == ""
+    assert captured["api_key"] == "copilot-session-xyz"
 
 
 async def test_auth_transport_injects_fresh_bearer(monkeypatch) -> None:
