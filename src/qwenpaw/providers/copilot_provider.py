@@ -48,6 +48,43 @@ def _copilot_chat_headers() -> dict:
     }
 
 
+class _CopilotAuthTransport(httpx.AsyncHTTPTransport):
+    """Async transport that injects a fresh Copilot bearer token per request.
+
+    Copilot session tokens are short-lived (~25 min). A chat model built once
+    by :meth:`CopilotProvider.get_chat_model_instance` may outlive a single
+    token, so the token must be minted/refreshed on every outgoing request
+    rather than captured at client-construction time. This transport calls back
+    into the provider's cached, auto-refreshing token getter and overwrites the
+    ``Authorization`` and per-request ``x-request-id`` headers accordingly.
+    """
+
+    def __init__(self, provider: "CopilotProvider") -> None:
+        super().__init__()
+        self._provider = provider
+
+    async def handle_async_request(
+        self,
+        request: httpx.Request,
+    ) -> httpx.Response:
+        token = await self._provider._get_copilot_token()
+        headers = [
+            (k, v)
+            for k, v in request.headers.items()
+            if k.lower() not in ("authorization", "x-request-id")
+        ]
+        headers.append(("authorization", f"Bearer {token}"))
+        headers.append(("x-request-id", str(uuid.uuid4())))
+        new_request = httpx.Request(
+            method=request.method,
+            url=request.url,
+            headers=headers,
+            content=request.content,
+            extensions=request.extensions,
+        )
+        return await super().handle_async_request(new_request)
+
+
 class CopilotProvider(Provider):
     """Provider for GitHub Copilot models via the OpenAI-compatible API."""
 
@@ -209,11 +246,18 @@ class CopilotProvider(Provider):
         client_kwargs: dict = {
             "base_url": self.base_url,
             "default_headers": _copilot_chat_headers(),
+            # The transport injects a fresh bearer token on every request, so
+            # long-lived chat models never use a stale Copilot session token.
+            "http_client": httpx.AsyncClient(
+                transport=_CopilotAuthTransport(self),
+            ),
         }
         return OpenAIChatModelCompat(
             model_name=model_id,
             stream=True,
-            api_key=getattr(self, "_auth_token", "") or self._copilot_token or "",
+            # Placeholder: the real Authorization header is set per request by
+            # _CopilotAuthTransport. AsyncOpenAI just requires a non-empty key.
+            api_key="copilot",
             stream_tool_parsing=False,
             client_kwargs=client_kwargs,
             generate_kwargs=self.get_effective_generate_kwargs(model_id),

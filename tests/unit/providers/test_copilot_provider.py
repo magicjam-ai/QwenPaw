@@ -121,3 +121,45 @@ async def test_fetch_models_maps_payload(monkeypatch) -> None:
     models = await provider.fetch_models(timeout=2.0)
 
     assert {m.id for m in models} == {"gpt-4o", "claude-3.7-sonnet"}
+
+
+async def test_auth_transport_injects_fresh_bearer(monkeypatch) -> None:
+    from qwenpaw.providers.copilot_provider import _CopilotAuthTransport
+
+    provider = _make_provider()
+
+    async def fake_token(self):  # noqa: ANN001
+        return "fresh-token"
+
+    captured: dict = {}
+
+    async def fake_super_handle(self, request):  # noqa: ANN001
+        captured["authorization"] = request.headers.get("authorization")
+        captured["x-request-id"] = request.headers.get("x-request-id")
+        return httpx.Response(200, request=request)
+
+    monkeypatch.setattr(CopilotProvider, "_get_copilot_token", fake_token)
+    monkeypatch.setattr(
+        httpx.AsyncHTTPTransport, "handle_async_request", fake_super_handle
+    )
+
+    transport = _CopilotAuthTransport(provider)
+    original = httpx.Request(
+        "POST",
+        f"{COPILOT_API_BASE_URL}/chat/completions",
+        headers={"authorization": "Bearer stale", "x-request-id": "old"},
+    )
+    await transport.handle_async_request(original)
+
+    assert captured["authorization"] == "Bearer fresh-token"
+    assert captured["x-request-id"] != "old"
+
+
+def test_get_chat_model_instance_uses_auth_transport() -> None:
+    from qwenpaw.providers.copilot_provider import _CopilotAuthTransport
+
+    provider = _make_provider()
+    model = provider.get_chat_model_instance("gpt-4o")
+
+    http_client = model.client._client  # AsyncOpenAI underlying httpx client
+    assert isinstance(http_client._transport, _CopilotAuthTransport)
