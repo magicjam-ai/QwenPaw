@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from qwenpaw.app import inbox_store
+from qwenpaw.workbench.models import WorkbenchCollectionIssue
 from qwenpaw.workbench import service as workbench_service_module
 from qwenpaw.workbench.service import WorkbenchService
 from qwenpaw.workbench.store import WorkbenchStore
@@ -44,6 +45,7 @@ class FakeCollector:
 class FailingCollector:
     def __init__(self):
         self.last_errors: dict[str, str] = {}
+        self.last_error_details: dict[str, WorkbenchCollectionIssue] = {}
 
     async def collect(
         self,
@@ -55,6 +57,17 @@ class FailingCollector:
     ):
         self.last_errors = {
             "calendar": "need_user_authorization: calendar:calendar.event:read",
+        }
+        self.last_error_details = {
+            "calendar": WorkbenchCollectionIssue(
+                source="calendar",
+                message="need_user_authorization: calendar:calendar.event:read",
+                code="need_user_authorization",
+                recovery_actions=[
+                    "运行 `lark-cli auth login --as user` 重新登录飞书用户身份。",
+                    "确认已授予日历权限后，点击“重新采集”。",
+                ],
+            ),
         }
         return []
 
@@ -317,3 +330,9 @@ def test_workbench_live_collect_returns_collection_errors(
     assert payload["collection_errors"] == {
         "calendar": "need_user_authorization: calendar:calendar.event:read",
     }
+    assert payload["collection_diagnostics"]["calendar"]["code"] == (
+        "need_user_authorization"
+    )
+    assert "auth login" in payload["collection_diagnostics"]["calendar"][
+        "recovery_actions"
+    ][0]

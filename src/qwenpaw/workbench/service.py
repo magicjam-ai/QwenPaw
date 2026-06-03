@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import Counter
 from datetime import datetime
 from typing import Iterable
@@ -13,6 +14,7 @@ from .models import (
     DailyRadarSections,
     WorkbenchCollectMode,
     WorkbenchCollectSource,
+    WorkbenchCollectionIssue,
     InsightStatus,
     WorkbenchConfig,
     WorkbenchInsight,
@@ -75,11 +77,76 @@ def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in lowered for keyword in keywords)
 
 
+def _displayable_person_name(value: str) -> str:
+    person = value.strip()
+    if not person:
+        return ""
+    if re.match(r"^(ou|on|oc|om|cli)_[A-Za-z0-9]+$", person):
+        return ""
+    if re.match(r"^[A-Za-z0-9_-]{24,}$", person):
+        return ""
+    return person
+
+
+def _displayable_title(title: str, summary: str, fallback: str) -> str:
+    value = title.strip()
+    if value and not re.match(r"^(ou|on|oc|om|cli)_[A-Za-z0-9]+$", value):
+        return value
+    summary_title = " ".join(summary.strip().split())
+    return summary_title[:80] or fallback
+
+
+def _record_relevant_for_date(record: WorkbenchRawRecord, date: str) -> bool:
+    if record.source_type == "lark_message":
+        return _same_date(record.created_at, date)
+    if record.source_type == "lark_calendar":
+        return _same_date(record.starts_at, date)
+    if record.source_type == "lark_task":
+        return not record.due_at or _same_or_before_date(record.due_at, date)
+    return True
+
+
+def _same_date(value: str | None, date: str) -> bool:
+    if not value:
+        return False
+    return value[:10] == date
+
+
+def _same_or_before_date(value: str | None, date: str) -> bool:
+    if not value:
+        return False
+    return value[:10] <= date
+
+
+def _is_broadcast_text(text: str) -> bool:
+    lowered = text.lower()
+    return "@_all" in lowered or "@所有人" in text or "@all" in lowered
+
+
+def _is_risk_record(record: WorkbenchRawRecord, date: str) -> bool:
+    text = f"{record.title} {record.summary}"
+    if _is_broadcast_text(text) or not _record_relevant_for_date(record, date):
+        return False
+    return _contains_any(text, ("blocked", "blocker", "overdue", "延期"))
+
+
+def _is_question_record(record: WorkbenchRawRecord, date: str) -> bool:
+    text = f"{record.title} {record.summary}"
+    if _is_broadcast_text(text) or not _record_relevant_for_date(record, date):
+        return False
+    lowered = text.lower()
+    return (
+        _contains_any(text, ("待确认", "需要确认"))
+        or bool(re.search(r"\bconfirm(?:ation)?\b", lowered))
+    )
+
+
 class WorkbenchService:
     def __init__(self, store: WorkbenchStore, lark_collector=None):
         self.store = store
         self.lark_collector = lark_collector
         self.last_collection_errors: dict[str, str] = {}
+        self.last_collection_diagnostics: dict[str, WorkbenchCollectionIssue] = {}
 
     def default_config(self) -> WorkbenchConfig:
         return WorkbenchConfig(
@@ -110,6 +177,7 @@ class WorkbenchService:
     ) -> tuple[str, list[WorkbenchRawRecord], DailyRadarCoverage]:
         target_date = date or _today()
         self.last_collection_errors = {}
+        self.last_collection_diagnostics = {}
         if mode == "live":
             config = await self.get_config()
             collector = self._get_lark_collector()
@@ -122,6 +190,9 @@ class WorkbenchService:
             )
             self.last_collection_errors = dict(
                 getattr(collector, "last_errors", {}) or {},
+            )
+            self.last_collection_diagnostics = dict(
+                getattr(collector, "last_error_details", {}) or {},
             )
         normalized = [
             record
@@ -197,12 +268,12 @@ class WorkbenchService:
 
         for record in records:
             for person in record.people:
-                if person.strip():
-                    people_counter[person.strip()] += 1
-            text = f"{record.title} {record.summary}"
-            if _contains_any(text, ("blocked", "blocker", "overdue", "延期")):
+                display_name = _displayable_person_name(person)
+                if display_name:
+                    people_counter[display_name] += 1
+            if _is_risk_record(record, date):
                 risk_records.append(record)
-            if _contains_any(text, ("confirm", "待确认", "需要确认", "owner")):
+            if _is_question_record(record, date):
                 question_records.append(record)
             if record.source_type == "lark_task":
                 sections.key_tasks.append(
@@ -270,12 +341,16 @@ class WorkbenchService:
                 record.title,
             ),
             kind=kind,  # type: ignore[arg-type]
-            title=record.title or record.source_id or kind,
+            title=_displayable_title(record.title, record.summary, record.source_id or kind),
             summary=record.summary,
             priority=priority,  # type: ignore[arg-type]
             confidence="medium",
             sources=[_source_ref(record)],
-            related_people=record.people,
+            related_people=[
+                person
+                for person in (_displayable_person_name(item) for item in record.people)
+                if person
+            ],
             related_projects=record.projects,
             due_at=due_at,
             created_at=record.created_at or _now_iso(),

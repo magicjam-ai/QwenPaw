@@ -33,7 +33,7 @@ class WorkbenchLarkIntegrationConfig(BaseModel):
             "overdue",
             "延期",
             "待确认",
-            "owner",
+            "confirm",
         ],
     )
 
@@ -127,6 +127,13 @@ class WorkbenchCollectRequest(BaseModel):
     records: list[WorkbenchRawRecord] = Field(default_factory=list)
 
 
+class WorkbenchCollectionIssue(BaseModel):
+    source: str
+    message: str
+    recovery_actions: list[str] = Field(default_factory=list)
+    code: str | None = None
+
+
 class WorkbenchAnalyzeRequest(BaseModel):
     date: str | None = None
 
@@ -140,6 +147,9 @@ class WorkbenchCollectResponse(BaseModel):
     records_added: int
     coverage: DailyRadarCoverage
     collection_errors: dict[str, str] = Field(default_factory=dict)
+    collection_diagnostics: dict[str, WorkbenchCollectionIssue] = Field(
+        default_factory=dict,
+    )
 
 
 class WorkbenchAnalyzeResponse(BaseModel):

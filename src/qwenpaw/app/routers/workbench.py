@@ -57,6 +57,7 @@ async def post_workbench_collect(
         records_added=len(records),
         coverage=coverage,
         collection_errors=service.last_collection_errors,
+        collection_diagnostics=service.last_collection_diagnostics,
     )
 
 
