@@ -4,8 +4,8 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from datetime import datetime
-from typing import Iterable
 
 from ..constant import WORKING_DIR
 from .models import (
@@ -33,7 +33,12 @@ def _today() -> str:
     return datetime.now().astimezone().date().isoformat()
 
 
-def _insight_id(kind: str, source_type: str, source_id: str, title: str) -> str:
+def _insight_id(
+    kind: str,
+    source_type: str,
+    source_id: str,
+    title: str,
+) -> str:
     key = f"{kind}:{source_type}:{source_id}:{title}".encode("utf-8")
     digest = hashlib.sha1(key).hexdigest()[:12]
     return f"{kind}-{digest}"
@@ -44,9 +49,11 @@ def _source_ref(record: WorkbenchRawRecord) -> WorkbenchSourceRef:
         source_type=record.source_type,
         source_id=record.source_id,
         title=record.title,
-        url=record.metadata.get("url")
-        if isinstance(record.metadata.get("url"), str)
-        else None,
+        url=(
+            record.metadata.get("url")
+            if isinstance(record.metadata.get("url"), str)
+            else None
+        ),
         excerpt=record.summary,
     )
 
@@ -135,9 +142,8 @@ def _is_question_record(record: WorkbenchRawRecord, date: str) -> bool:
     if _is_broadcast_text(text) or not _record_relevant_for_date(record, date):
         return False
     lowered = text.lower()
-    return (
-        _contains_any(text, ("待确认", "需要确认"))
-        or bool(re.search(r"\bconfirm(?:ation)?\b", lowered))
+    return _contains_any(text, ("待确认", "需要确认")) or bool(
+        re.search(r"\bconfirm(?:ation)?\b", lowered),
     )
 
 
@@ -146,7 +152,10 @@ class WorkbenchService:
         self.store = store
         self.lark_collector = lark_collector
         self.last_collection_errors: dict[str, str] = {}
-        self.last_collection_diagnostics: dict[str, WorkbenchCollectionIssue] = {}
+        self.last_collection_diagnostics: dict[
+            str,
+            WorkbenchCollectionIssue,
+        ] = {}
 
     def default_config(self) -> WorkbenchConfig:
         return WorkbenchConfig(
@@ -169,7 +178,7 @@ class WorkbenchService:
     async def collect(
         self,
         *,
-        records: list[dict | WorkbenchRawRecord],
+        records: Sequence[dict | WorkbenchRawRecord],
         date: str | None = None,
         mode: WorkbenchCollectMode = "manual",
         sources: list[WorkbenchCollectSource] | None = None,
@@ -195,9 +204,11 @@ class WorkbenchService:
                 getattr(collector, "last_error_details", {}) or {},
             )
         normalized = [
-            record
-            if isinstance(record, WorkbenchRawRecord)
-            else WorkbenchRawRecord(**record)
+            (
+                record
+                if isinstance(record, WorkbenchRawRecord)
+                else WorkbenchRawRecord(**record)
+            )
             for record in records
         ]
         stamped = [
@@ -341,14 +352,20 @@ class WorkbenchService:
                 record.title,
             ),
             kind=kind,  # type: ignore[arg-type]
-            title=_displayable_title(record.title, record.summary, record.source_id or kind),
+            title=_displayable_title(
+                record.title,
+                record.summary,
+                record.source_id or kind,
+            ),
             summary=record.summary,
             priority=priority,  # type: ignore[arg-type]
             confidence="medium",
             sources=[_source_ref(record)],
             related_people=[
                 person
-                for person in (_displayable_person_name(item) for item in record.people)
+                for person in (
+                    _displayable_person_name(item) for item in record.people
+                )
                 if person
             ],
             related_projects=record.projects,

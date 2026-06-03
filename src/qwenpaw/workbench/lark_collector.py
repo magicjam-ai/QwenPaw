@@ -20,7 +20,14 @@ from .models import (
     WorkbenchRawRecord,
 )
 
-DEFAULT_CHAT_KEYWORDS = ("blocked", "blocker", "overdue", "延期", "待确认", "confirm")
+DEFAULT_CHAT_KEYWORDS = (
+    "blocked",
+    "blocker",
+    "overdue",
+    "延期",
+    "待确认",
+    "confirm",
+)
 LARK_OPENAPI_BASE_URL = "https://open.feishu.cn/open-apis"
 
 
@@ -80,7 +87,7 @@ class LarkCommandRunner:
                 process.communicate(),
                 timeout=self.timeout_seconds,
             )
-        except (TimeoutError, asyncio.TimeoutError):
+        except (TimeoutError, asyncio.TimeoutError) as exc:
             process.kill()
             await process.communicate()
             raise LarkCommandError(
@@ -90,16 +97,21 @@ class LarkCommandRunner:
                     "检查本机网络和飞书登录状态后重试。",
                     "如果 lark-cli 首次授权弹窗未完成，请完成授权后点击“重新采集”。",
                 ],
-            )
+            ) from exc
         stdout_text = stdout.decode("utf-8", errors="replace")
         stderr_text = stderr.decode("utf-8", errors="replace")
-        payload = _try_parse_json_output(stdout_text) or _try_parse_json_output(
+        payload = _try_parse_json_output(
+            stdout_text,
+        ) or _try_parse_json_output(
             stderr_text,
         )
         if process.returncode != 0:
+            return_code = (
+                process.returncode if process.returncode is not None else 1
+            )
             raise _command_error_from_payload(
                 argv,
-                process.returncode,
+                return_code,
                 payload,
                 stdout_text,
                 stderr_text,
@@ -112,7 +124,9 @@ class LarkCommandRunner:
                 stdout_text,
                 stderr_text,
             )
-        return payload if payload is not None else _parse_json_output(stdout_text)
+        return (
+            payload if payload is not None else _parse_json_output(stdout_text)
+        )
 
 
 class LarkAuthEnvCollector:
@@ -140,8 +154,7 @@ class LarkAuthEnvCollector:
         token = _load_lark_auth_token(self.env_paths)
         if not token:
             return [], {
-                source: _auth_env_missing_issue(source)
-                for source in sources
+                source: _auth_env_missing_issue(source) for source in sources
             }
 
         records: list[WorkbenchRawRecord] = []
@@ -205,7 +218,10 @@ class LarkAuthEnvCollector:
                 "user_id_type": "open_id",
             },
         )
-        return [_event_to_record(item) for item in _find_items(payload, _looks_like_event)]
+        return [
+            _event_to_record(item)
+            for item in _find_items(payload, _looks_like_event)
+        ]
 
     async def _collect_tasks(
         self,
@@ -224,7 +240,10 @@ class LarkAuthEnvCollector:
                 "user_id_type": "open_id",
             },
         )
-        return [_task_to_record(item) for item in _find_items(payload, _looks_like_task)]
+        return [
+            _task_to_record(item)
+            for item in _find_items(payload, _looks_like_task)
+        ]
 
     async def _collect_chat(
         self,
@@ -260,7 +279,10 @@ class LarkAuthEnvCollector:
                     )
                     records.extend(
                         _message_to_record(item)
-                        for item in _find_items(message_payload, _looks_like_message)
+                        for item in _find_items(
+                            message_payload,
+                            _looks_like_message,
+                        )
                         if _message_should_collect(item, start, end)
                     )
             except LarkCommandError as exc:
@@ -268,7 +290,9 @@ class LarkAuthEnvCollector:
                 if _is_fatal_lark_error(exc.to_issue("chat")):
                     raise exc
                 continue
-            except Exception as exc:  # pragma: no cover - network failures vary
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - network failures vary
                 keyword_failures.append((keyword, _generic_issue("chat", exc)))
                 continue
         if keyword_failures:
@@ -296,7 +320,11 @@ class LarkAuthEnvCollector:
                     people.append(display)
                     continue
                 if _looks_like_lark_user_id(person):
-                    resolved = await self._resolve_user_name(client, token, person)
+                    resolved = await self._resolve_user_name(
+                        client,
+                        token,
+                        person,
+                    )
                     if resolved:
                         people.append(resolved)
             title = record.title
@@ -358,7 +386,11 @@ class LarkAuthEnvCollector:
         except LarkCommandError:
             self._chat_name_cache[chat_id] = ""
             return ""
-        name = _first_str(payload, "name", "chat_name", "title") if isinstance(payload, dict) else ""
+        name = (
+            _first_str(payload, "name", "chat_name", "title")
+            if isinstance(payload, dict)
+            else ""
+        )
         name = "" if _looks_like_lark_identifier(name) else name
         self._chat_name_cache[chat_id] = name
         return name
@@ -417,7 +449,11 @@ class LarkAuthEnvCollector:
             isinstance(payload, dict) and payload.get("code") not in (None, 0)
         ):
             raise _openapi_error_from_payload(response.status_code, payload)
-        return payload.get("data", payload) if isinstance(payload, dict) else payload
+        return (
+            payload.get("data", payload)
+            if isinstance(payload, dict)
+            else payload
+        )
 
 
 class LarkCollector:
@@ -448,7 +484,10 @@ class LarkCollector:
         requested_sources = _requested_lark_sources(config, enabled_sources)
         preflight_issue = await self._preflight_context()
         if preflight_issue is not None:
-            fallback_records, fallback_issues = await self.auth_env_collector.collect(
+            (
+                fallback_records,
+                fallback_issues,
+            ) = await self.auth_env_collector.collect(
                 date=date,
                 config=config,
                 sources=requested_sources,
@@ -464,14 +503,24 @@ class LarkCollector:
 
         records: list[WorkbenchRawRecord] = []
         if config.collect_calendar and "calendar" in enabled_sources:
-            records.extend(await self._safe_collect("calendar", self._collect_calendar(date)))
+            records.extend(
+                await self._safe_collect(
+                    "calendar",
+                    self._collect_calendar(date),
+                ),
+            )
         if config.collect_tasks and "tasks" in enabled_sources:
-            records.extend(await self._safe_collect("tasks", self._collect_tasks(date)))
+            records.extend(
+                await self._safe_collect("tasks", self._collect_tasks(date)),
+            )
         if config.collect_chat and "chat" in enabled_sources:
             records.extend(
                 await self._safe_collect(
                     "chat",
-                    self._collect_chat(date, chat_keywords or list(DEFAULT_CHAT_KEYWORDS)),
+                    self._collect_chat(
+                        date,
+                        chat_keywords or list(DEFAULT_CHAT_KEYWORDS),
+                    ),
                 ),
             )
         records.extend(
@@ -508,7 +557,10 @@ class LarkCollector:
         if not failed_sources:
             return []
 
-        fallback_records, fallback_issues = await self.auth_env_collector.collect(
+        (
+            fallback_records,
+            fallback_issues,
+        ) = await self.auth_env_collector.collect(
             date=date,
             config=config,
             sources=failed_sources,
@@ -546,7 +598,9 @@ class LarkCollector:
             self.last_errors[source] = exc.message
             self.last_error_details[source] = exc.to_issue(source)
             return []
-        except Exception as exc:  # pragma: no cover - exact lark-cli failures vary
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - exact lark-cli failures vary
             issue = _generic_issue(source, exc)
             self.last_errors[source] = issue.message
             self.last_error_details[source] = issue
@@ -569,7 +623,10 @@ class LarkCollector:
                 "json",
             ],
         )
-        return [_event_to_record(item) for item in _find_items(payload, _looks_like_event)]
+        return [
+            _event_to_record(item)
+            for item in _find_items(payload, _looks_like_event)
+        ]
 
     async def _collect_tasks(self, date: str) -> list[WorkbenchRawRecord]:
         _, end = _day_window(date, days=7)
@@ -590,7 +647,10 @@ class LarkCollector:
                 "json",
             ],
         )
-        return [_task_to_record(item) for item in _find_items(payload, _looks_like_task)]
+        return [
+            _task_to_record(item)
+            for item in _find_items(payload, _looks_like_task)
+        ]
 
     async def _collect_chat(
         self,
@@ -630,7 +690,9 @@ class LarkCollector:
                 if _is_fatal_lark_error(issue):
                     raise exc
                 continue
-            except Exception as exc:  # pragma: no cover - command failures vary
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - command failures vary
                 keyword_failures.append((keyword, _generic_issue("chat", exc)))
                 continue
             records.extend(
@@ -709,7 +771,10 @@ def _command_error_from_payload(
     )
 
 
-def _openapi_error_from_payload(status_code: int, payload: Any) -> LarkCommandError:
+def _openapi_error_from_payload(
+    status_code: int,
+    payload: Any,
+) -> LarkCommandError:
     code = str(status_code)
     message = f"飞书 OpenAPI 返回 HTTP {status_code}"
     if isinstance(payload, dict):
@@ -721,7 +786,9 @@ def _openapi_error_from_payload(status_code: int, payload: Any) -> LarkCommandEr
             message = str(message_value).strip()
         if isinstance(payload.get("error"), dict):
             error = payload["error"]
-            message = str(error.get("message") or error.get("msg") or message).strip()
+            message = str(
+                error.get("message") or error.get("msg") or message,
+            ).strip()
             if error.get("code"):
                 code = str(error["code"])
     return LarkCommandError(
@@ -803,9 +870,9 @@ def _parse_env_line(line: str) -> tuple[str, str]:
     if not stripped or stripped.startswith("#"):
         return "", ""
     if stripped.startswith("export "):
-        stripped = stripped[len("export "):]
+        stripped = stripped[len("export ") :]
     elif stripped.startswith("$env:"):
-        stripped = stripped[len("$env:"):]
+        stripped = stripped[len("$env:") :]
     if "=" not in stripped:
         return "", ""
     key, value = stripped.split("=", 1)
@@ -845,10 +912,7 @@ def _is_fatal_lark_error(issue: WorkbenchCollectionIssue) -> bool:
 def _keyword_failure_issue(
     failures: list[tuple[str, WorkbenchCollectionIssue]],
 ) -> WorkbenchCollectionIssue:
-    messages = [
-        f"{keyword}: {issue.message}"
-        for keyword, issue in failures
-    ]
+    messages = [f"{keyword}: {issue.message}" for keyword, issue in failures]
     actions: list[str] = []
     code = failures[0][1].code
     for _, issue in failures:
@@ -926,7 +990,9 @@ def _day_window(date: str, *, days: int) -> tuple[str, str]:
     target = date_type.fromisoformat(date)
     start = datetime.combine(target, time.min, tzinfo=tz)
     end = start + timedelta(days=days)
-    return start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds")
+    return start.isoformat(timespec="seconds"), end.isoformat(
+        timespec="seconds",
+    )
 
 
 def _day_window_unix(date: str, *, days: int) -> tuple[int, int]:
@@ -942,7 +1008,9 @@ def _chat_window(date: str) -> tuple[str, str]:
     target = date_type.fromisoformat(date)
     start = datetime.combine(target - timedelta(days=1), time.min, tzinfo=tz)
     end = datetime.combine(target + timedelta(days=1), time.min, tzinfo=tz)
-    return start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds")
+    return start.isoformat(timespec="seconds"), end.isoformat(
+        timespec="seconds",
+    )
 
 
 def _find_items(payload: Any, predicate) -> list[dict[str, Any]]:
@@ -981,15 +1049,15 @@ def _find_message_ids(payload: Any) -> list[str]:
 
 
 def _looks_like_event(item: dict[str, Any]) -> bool:
-    return any(key in item for key in ("event_id", "calendar_event_id")) and any(
-        key in item for key in ("summary", "title", "subject")
-    )
+    return any(
+        key in item for key in ("event_id", "calendar_event_id")
+    ) and any(key in item for key in ("summary", "title", "subject"))
 
 
 def _looks_like_task(item: dict[str, Any]) -> bool:
-    return any(key in item for key in ("guid", "task_guid", "task_id")) and any(
-        key in item for key in ("summary", "title", "name")
-    )
+    return any(
+        key in item for key in ("guid", "task_guid", "task_id")
+    ) and any(key in item for key in ("summary", "title", "name"))
 
 
 def _looks_like_message(item: dict[str, Any]) -> bool:
@@ -1037,7 +1105,9 @@ def _message_to_record(item: dict[str, Any]) -> WorkbenchRawRecord:
         title=chat_name or sender or "Lark message",
         summary=text,
         people=people,
-        created_at=_timestamp_to_iso(_first_str(item, "create_time", "created_at")),
+        created_at=_timestamp_to_iso(
+            _first_str(item, "create_time", "created_at"),
+        ),
         metadata={"url": _first_str(item, "url", "app_link", "link")},
     )
 
@@ -1157,7 +1227,11 @@ def _people_from(item: dict[str, Any]) -> list[str]:
     for key in ("attendees", "members", "owners", "followers", "assignees"):
         value = item.get(key)
         if isinstance(value, list):
-            people.extend(_name_from_dict(child) for child in value if isinstance(child, dict))
+            people.extend(
+                _name_from_dict(child)
+                for child in value
+                if isinstance(child, dict)
+            )
     return [person for person in dict.fromkeys(people) if person]
 
 
@@ -1169,7 +1243,14 @@ def _sender_name(item: dict[str, Any]) -> str:
 
 
 def _name_from_dict(item: dict[str, Any]) -> str:
-    return _first_str(item, "display_name", "name", "user_name", "open_id", "id")
+    return _first_str(
+        item,
+        "display_name",
+        "name",
+        "user_name",
+        "open_id",
+        "id",
+    )
 
 
 def _displayable_person_name(value: str) -> str:
@@ -1238,7 +1319,9 @@ def _datetime_from_lark_time(value: str) -> datetime | None:
         return None
 
 
-def _dedupe_records(records: Iterable[WorkbenchRawRecord]) -> list[WorkbenchRawRecord]:
+def _dedupe_records(
+    records: Iterable[WorkbenchRawRecord],
+) -> list[WorkbenchRawRecord]:
     seen: set[tuple[str, str]] = set()
     unique: list[WorkbenchRawRecord] = []
     for record in records:

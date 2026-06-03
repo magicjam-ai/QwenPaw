@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
+# pylint: disable=protected-access
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -19,6 +21,8 @@ from qwenpaw.workbench.models import (
     WorkbenchLarkIntegrationConfig,
     WorkbenchRawRecord,
 )
+
+OWNER_CONFIRM_TEXT = "Need confirm owner for overdue task"
 
 
 class FakeRunner:
@@ -67,8 +71,8 @@ class FakeRunner:
                         "chat_name": "Workbench Group",
                         "sender": {"name": "Bob"},
                         "body": {
-                            "content": (
-                                "{\"text\":\"Need confirm owner for overdue task\"}"
+                            "content": json.dumps(
+                                {"text": OWNER_CONFIRM_TEXT},
                             ),
                         },
                         "create_time": "1780372800000",
@@ -79,8 +83,8 @@ class FakeRunner:
                         "chat_name": "Workbench Group",
                         "sender": {"name": "Bob"},
                         "body": {
-                            "content": (
-                                "{\"text\":\"Need confirm owner for overdue task\"}"
+                            "content": json.dumps(
+                                {"text": OWNER_CONFIRM_TEXT},
                             ),
                         },
                         "create_time": "1780372800000",
@@ -107,7 +111,7 @@ class FailingRunner:
 
 
 class NoopAuthEnvCollector:
-    async def collect(self, **kwargs):
+    async def collect(self, **_kwargs):
         return [], {}
 
 
@@ -264,7 +268,10 @@ async def test_lark_collector_respects_disabled_sources():
 @pytest.mark.asyncio
 async def test_lark_collector_exposes_actionable_command_errors():
     runner = FailingRunner()
-    collector = LarkCollector(runner=runner, auth_env_collector=NoopAuthEnvCollector())
+    collector = LarkCollector(
+        runner=runner,
+        auth_env_collector=NoopAuthEnvCollector(),
+    )
 
     records = await collector.collect(
         date="2026-06-02",
@@ -288,7 +295,10 @@ async def test_lark_collector_exposes_actionable_command_errors():
 @pytest.mark.asyncio
 async def test_lark_collector_preflight_fans_out_global_errors():
     runner = FailingRunner()
-    collector = LarkCollector(runner=runner, auth_env_collector=NoopAuthEnvCollector())
+    collector = LarkCollector(
+        runner=runner,
+        auth_env_collector=NoopAuthEnvCollector(),
+    )
 
     records = await collector.collect(
         date="2026-06-02",
@@ -349,11 +359,14 @@ async def test_lark_collector_uses_auth_env_fallback_for_source_auth_errors():
 
     assert [record.source_id for record in records] == ["auth-event-1"]
     assert auth_env_collector.calls[0]["sources"] == ["calendar"]
-    assert collector.last_errors == {}
-    assert collector.last_error_details == {}
+    assert not collector.last_errors
+    assert not collector.last_error_details
 
 
-def test_load_lark_auth_token_prefers_refreshed_env_file(tmp_path, monkeypatch):
+def test_load_lark_auth_token_prefers_refreshed_env_file(
+    tmp_path,
+    monkeypatch,
+):
     stale_file = tmp_path / ".feishu_auth_env.ps1"
     fresh_file = tmp_path / ".feishu_auth_env"
     stale_file.write_text(
@@ -378,7 +391,7 @@ def test_message_should_collect_filters_all_mentions_and_old_messages():
     assert not _message_should_collect(
         {
             "message_id": "msg-all",
-            "body": {"content": "{\"text\":\"@_all blocked by deployment\"}"},
+            "body": {"content": '{"text":"@_all blocked by deployment"}'},
             "create_time": "2026-06-02T10:00:00+08:00",
         },
         start,
@@ -409,7 +422,7 @@ async def test_auth_env_collector_resolves_lark_ids_to_names(monkeypatch):
     collector = LarkAuthEnvCollector()
     requests: list[str] = []
 
-    async def fake_request(client, token, method, path, **kwargs):
+    async def fake_request(_client, _token, _method, path, **_kwargs):
         requests.append(path)
         if path == "/im/v1/chats/oc_123":
             return {"name": "Launch Group"}
@@ -467,7 +480,9 @@ async def test_lark_command_runner_times_out_hung_process():
     runner = LarkCommandRunner(timeout_seconds=0.01)
 
     with pytest.raises(LarkCommandError) as exc_info:
-        await runner.run_json([sys.executable, "-c", "import time; time.sleep(1)"])
+        await runner.run_json(
+            [sys.executable, "-c", "import time; time.sleep(1)"],
+        )
 
     assert exc_info.value.code == "timeout"
     assert "timed out" in exc_info.value.message
