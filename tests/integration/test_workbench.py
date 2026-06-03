@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
+# pylint: disable=unused-argument,redefined-outer-name
 from __future__ import annotations
 
 import json
 import sys
 import types
+from collections.abc import Generator
 from dataclasses import dataclass
 from importlib import util
 from pathlib import Path
@@ -54,7 +56,9 @@ class FailingCollector:
         chat_keywords=None,
     ):
         self.last_errors = {
-            "calendar": "need_user_authorization: calendar:calendar.event:read",
+            "calendar": (
+                "need_user_authorization: calendar:calendar.event:read"
+            ),
         }
         return []
 
@@ -63,8 +67,11 @@ def _load_workbench_router():
     routers_pkg_name = "qwenpaw.app.routers"
     if routers_pkg_name not in sys.modules:
         routers_pkg = types.ModuleType(routers_pkg_name)
+        routers_path = (
+            Path(__file__).parents[2] / "src" / "qwenpaw" / "app" / "routers"
+        )
         routers_pkg.__path__ = [
-            str(Path(__file__).parents[2] / "src" / "qwenpaw" / "app" / "routers"),
+            str(routers_path),
         ]
         sys.modules[routers_pkg_name] = routers_pkg
 
@@ -103,7 +110,7 @@ def _workbench_root(working_dir: Path) -> Path:
 def workbench_client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> WorkbenchClient:
+) -> Generator[WorkbenchClient, None, None]:
     working_dir = tmp_path / "working"
     working_dir.mkdir()
     monkeypatch.setattr(
@@ -147,7 +154,8 @@ def test_workbench_config_and_init_contract(
         "comms",
         "issues",
     ):
-        assert (_workbench_root(workbench_client.working_dir) / rel_path).is_dir()
+        expected_dir = _workbench_root(workbench_client.working_dir) / rel_path
+        assert expected_dir.is_dir()
 
 
 @pytest.mark.integration

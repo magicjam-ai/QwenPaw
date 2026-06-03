@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from datetime import datetime
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from ..constant import WORKING_DIR
 from .models import (
@@ -31,7 +31,12 @@ def _today() -> str:
     return datetime.now().astimezone().date().isoformat()
 
 
-def _insight_id(kind: str, source_type: str, source_id: str, title: str) -> str:
+def _insight_id(
+    kind: str,
+    source_type: str,
+    source_id: str,
+    title: str,
+) -> str:
     key = f"{kind}:{source_type}:{source_id}:{title}".encode("utf-8")
     digest = hashlib.sha1(key).hexdigest()[:12]
     return f"{kind}-{digest}"
@@ -102,7 +107,7 @@ class WorkbenchService:
     async def collect(
         self,
         *,
-        records: list[dict | WorkbenchRawRecord],
+        records: Sequence[dict | WorkbenchRawRecord],
         date: str | None = None,
         mode: WorkbenchCollectMode = "manual",
         sources: list[WorkbenchCollectSource] | None = None,

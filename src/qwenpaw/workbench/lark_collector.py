@@ -11,7 +11,14 @@ from typing import Any, Protocol
 
 from .models import WorkbenchLarkIntegrationConfig, WorkbenchRawRecord
 
-DEFAULT_CHAT_KEYWORDS = ("blocked", "blocker", "overdue", "延期", "待确认", "owner")
+DEFAULT_CHAT_KEYWORDS = (
+    "blocked",
+    "blocker",
+    "overdue",
+    "延期",
+    "待确认",
+    "owner",
+)
 
 
 class JsonCommandRunner(Protocol):
@@ -36,8 +43,9 @@ class LarkCommandRunner:
         stdout_text = stdout.decode("utf-8", errors="replace")
         stderr_text = stderr.decode("utf-8", errors="replace")
         if process.returncode != 0:
+            detail = stderr_text.strip()
             raise LarkCommandError(
-                f"{argv[:3]} exited {process.returncode}: {stderr_text.strip()}",
+                f"{argv[:3]} exited {process.returncode}: {detail}",
             )
         return _parse_json_output(stdout_text)
 
@@ -62,14 +70,22 @@ class LarkCollector:
         enabled_sources = set(sources or ("calendar", "tasks", "chat"))
         records: list[WorkbenchRawRecord] = []
         if config.collect_calendar and "calendar" in enabled_sources:
-            records.extend(await self._safe_collect("calendar", self._collect_calendar(date)))
+            records.extend(
+                await self._safe_collect(
+                    "calendar",
+                    self._collect_calendar(date),
+                ),
+            )
         if config.collect_tasks and "tasks" in enabled_sources:
-            records.extend(await self._safe_collect("tasks", self._collect_tasks(date)))
+            records.extend(
+                await self._safe_collect("tasks", self._collect_tasks(date)),
+            )
         if config.collect_chat and "chat" in enabled_sources:
+            keywords = chat_keywords or list(DEFAULT_CHAT_KEYWORDS)
             records.extend(
                 await self._safe_collect(
                     "chat",
-                    self._collect_chat(date, chat_keywords or list(DEFAULT_CHAT_KEYWORDS)),
+                    self._collect_chat(date, keywords),
                 ),
             )
         return _dedupe_records(records)
@@ -81,7 +97,7 @@ class LarkCollector:
     ) -> list[WorkbenchRawRecord]:
         try:
             return await awaitable
-        except Exception as exc:  # pragma: no cover - exact lark-cli failures vary
+        except Exception as exc:  # pragma: no cover - lark-cli failures vary
             self.last_errors[source] = str(exc)
             return []
 
@@ -102,7 +118,10 @@ class LarkCollector:
                 "json",
             ],
         )
-        return [_event_to_record(item) for item in _find_items(payload, _looks_like_event)]
+        return [
+            _event_to_record(item)
+            for item in _find_items(payload, _looks_like_event)
+        ]
 
     async def _collect_tasks(self, date: str) -> list[WorkbenchRawRecord]:
         _, end = _day_window(date, days=7)
@@ -123,7 +142,10 @@ class LarkCollector:
                 "json",
             ],
         )
-        return [_task_to_record(item) for item in _find_items(payload, _looks_like_task)]
+        return [
+            _task_to_record(item)
+            for item in _find_items(payload, _looks_like_task)
+        ]
 
     async def _collect_chat(
         self,
@@ -182,7 +204,10 @@ def _day_window(date: str, *, days: int) -> tuple[str, str]:
     target = date_type.fromisoformat(date)
     start = datetime.combine(target, time.min, tzinfo=tz)
     end = start + timedelta(days=days)
-    return start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds")
+    return (
+        start.isoformat(timespec="seconds"),
+        end.isoformat(timespec="seconds"),
+    )
 
 
 def _chat_window(date: str) -> tuple[str, str]:
@@ -190,7 +215,10 @@ def _chat_window(date: str) -> tuple[str, str]:
     target = date_type.fromisoformat(date)
     start = datetime.combine(target - timedelta(days=1), time.min, tzinfo=tz)
     end = datetime.combine(target + timedelta(days=1), time.min, tzinfo=tz)
-    return start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds")
+    return (
+        start.isoformat(timespec="seconds"),
+        end.isoformat(timespec="seconds"),
+    )
 
 
 def _find_items(payload: Any, predicate) -> list[dict[str, Any]]:
@@ -212,15 +240,15 @@ def _find_items(payload: Any, predicate) -> list[dict[str, Any]]:
 
 
 def _looks_like_event(item: dict[str, Any]) -> bool:
-    return any(key in item for key in ("event_id", "calendar_event_id")) and any(
+    has_id = any(key in item for key in ("event_id", "calendar_event_id"))
+    return has_id and any(
         key in item for key in ("summary", "title", "subject")
     )
 
 
 def _looks_like_task(item: dict[str, Any]) -> bool:
-    return any(key in item for key in ("guid", "task_guid", "task_id")) and any(
-        key in item for key in ("summary", "title", "name")
-    )
+    has_id = any(key in item for key in ("guid", "task_guid", "task_id"))
+    return has_id and any(key in item for key in ("summary", "title", "name"))
 
 
 def _looks_like_message(item: dict[str, Any]) -> bool:
@@ -268,7 +296,9 @@ def _message_to_record(item: dict[str, Any]) -> WorkbenchRawRecord:
         title=chat_name or sender or "Lark message",
         summary=text,
         people=people,
-        created_at=_timestamp_to_iso(_first_str(item, "create_time", "created_at")),
+        created_at=_timestamp_to_iso(
+            _first_str(item, "create_time", "created_at"),
+        ),
         metadata={"url": _first_str(item, "url", "app_link", "link")},
     )
 
@@ -288,7 +318,11 @@ def _people_from(item: dict[str, Any]) -> list[str]:
     for key in ("attendees", "members", "owners", "followers", "assignees"):
         value = item.get(key)
         if isinstance(value, list):
-            people.extend(_name_from_dict(child) for child in value if isinstance(child, dict))
+            people.extend(
+                _name_from_dict(child)
+                for child in value
+                if isinstance(child, dict)
+            )
     return [person for person in dict.fromkeys(people) if person]
 
 
@@ -300,7 +334,14 @@ def _sender_name(item: dict[str, Any]) -> str:
 
 
 def _name_from_dict(item: dict[str, Any]) -> str:
-    return _first_str(item, "display_name", "name", "user_name", "open_id", "id")
+    return _first_str(
+        item,
+        "display_name",
+        "name",
+        "user_name",
+        "open_id",
+        "id",
+    )
 
 
 def _due_from(item: dict[str, Any]) -> str | None:
@@ -329,7 +370,9 @@ def _timestamp_to_iso(value: str) -> str | None:
     return datetime.fromtimestamp(timestamp).astimezone().isoformat()
 
 
-def _dedupe_records(records: Iterable[WorkbenchRawRecord]) -> list[WorkbenchRawRecord]:
+def _dedupe_records(
+    records: Iterable[WorkbenchRawRecord],
+) -> list[WorkbenchRawRecord]:
     seen: set[tuple[str, str]] = set()
     unique: list[WorkbenchRawRecord] = []
     for record in records:
