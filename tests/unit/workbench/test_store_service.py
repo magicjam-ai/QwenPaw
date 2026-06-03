@@ -166,11 +166,12 @@ async def test_update_insight_status_persists_actions(tmp_path):
     assert ignored.status == "ignored"
     assert converted.status == "converted"
     assert persisted.sections.key_tasks[0].status == "converted"
-    assert (tmp_path / ".workbench" / "issues" / f"{insight_id}.json").is_file()
+    issue_path = tmp_path / ".workbench" / "issues" / f"{insight_id}.json"
+    assert issue_path.is_file()
 
 
 @pytest.mark.asyncio
-async def test_collect_live_uses_lark_collector_and_persists_records(tmp_path):
+async def test_collect_live_with_lark_persists_records(tmp_path):
     store = WorkbenchStore(tmp_path)
     collector = FakeCollector()
     service = WorkbenchService(store, lark_collector=collector)

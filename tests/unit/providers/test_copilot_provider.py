@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+# pylint: disable=protected-access,unused-argument
 import time
 from types import SimpleNamespace
 
@@ -31,7 +33,10 @@ async def test_get_copilot_token_exchanges_and_caches(monkeypatch) -> None:
         calls.append(url)
         return httpx.Response(
             200,
-            json={"token": "copilot-abc", "expires_at": int(time.time()) + 1800},
+            json={
+                "token": "copilot-abc",
+                "expires_at": int(time.time()) + 1800,
+            },
             request=httpx.Request("GET", url),
         )
 
@@ -49,7 +54,7 @@ async def test_get_copilot_token_exchanges_and_caches(monkeypatch) -> None:
 async def test_get_copilot_token_refreshes_when_expired(monkeypatch) -> None:
     provider = _make_provider()
     provider._copilot_token = "stale"
-    provider._copilot_token_expires_at = time.time() + 60  # within safety margin
+    provider._copilot_token_expires_at = time.time() + 60
 
     async def fake_get(self, url, headers=None):  # noqa: ANN001
         return httpx.Response(
@@ -112,7 +117,7 @@ async def test_fetch_models_maps_payload(monkeypatch) -> None:
                 data=[
                     SimpleNamespace(id="gpt-4o"),
                     SimpleNamespace(id="claude-3.7-sonnet"),
-                ]
+                ],
             )
 
     monkeypatch.setattr(CopilotProvider, "_get_copilot_token", fake_token)
@@ -127,12 +132,12 @@ async def test_fetch_models_maps_payload(monkeypatch) -> None:
     assert {m.id for m in models} == {"gpt-4o", "claude-3.7-sonnet"}
 
 
-async def test_check_connection_sends_session_token_as_api_key(monkeypatch) -> None:
+async def test_check_connection_uses_session_token(monkeypatch) -> None:
     """Regression: the OpenAI client must carry the Copilot session token.
 
     Previously ``_client`` read a never-populated ``_auth_token`` attribute and
-    built ``AsyncOpenAI`` with an empty ``api_key``, so every connection check /
-    model discovery hit Copilot with no Authorization header and failed with
+    built ``AsyncOpenAI`` with an empty ``api_key``, so connection checks and
+    discovery hit Copilot with no Authorization header and failed with
     ``bad request: missing required Authorization header``.
     """
     import qwenpaw.providers.copilot_provider as mod
@@ -162,7 +167,7 @@ async def test_check_connection_sends_session_token_as_api_key(monkeypatch) -> N
     assert captured["api_key"] == "copilot-session-xyz"
 
 
-async def test_check_connection_surfaces_api_error_message(monkeypatch) -> None:
+async def test_check_connection_surfaces_api_error(monkeypatch) -> None:
     """A Copilot API error (e.g. quota) must surface its real reason.
 
     The handler previously collapsed every ``APIError`` into a generic
@@ -186,7 +191,7 @@ async def test_check_connection_surfaces_api_error_message(monkeypatch) -> None:
                     "error": {
                         "message": "You have exceeded your monthly quota",
                         "code": "quota_exceeded",
-                    }
+                    },
                 },
             )
 
@@ -220,7 +225,9 @@ async def test_auth_transport_injects_fresh_bearer(monkeypatch) -> None:
 
     monkeypatch.setattr(CopilotProvider, "_get_copilot_token", fake_token)
     monkeypatch.setattr(
-        httpx.AsyncHTTPTransport, "handle_async_request", fake_super_handle
+        httpx.AsyncHTTPTransport,
+        "handle_async_request",
+        fake_super_handle,
     )
 
     transport = _CopilotAuthTransport(provider)
@@ -243,6 +250,7 @@ def test_get_chat_model_instance_uses_auth_transport() -> None:
 
     http_client = model.client._client  # AsyncOpenAI underlying httpx client
     assert isinstance(http_client._transport, _CopilotAuthTransport)
+
 
 def test_update_config_invalidates_token_on_key_change() -> None:
     provider = _make_provider(api_key="gho_old")

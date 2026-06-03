@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+# pylint: disable=consider-using-from-import,protected-access,unused-argument
 import httpx
 import pytest
 
@@ -51,7 +53,10 @@ async def test_start_device_code_stores_flow(monkeypatch) -> None:
 
 
 async def test_poll_status_pending(monkeypatch) -> None:
-    _flow_store["flow-1"] = copilot_auth._Flow(device_code="DEV", expires_at=1e18)
+    _flow_store["flow-1"] = copilot_auth._Flow(
+        device_code="DEV",
+        expires_at=1e18,
+    )
 
     async def fake_post(self, url, data=None, headers=None):  # noqa: ANN001
         return httpx.Response(
@@ -70,7 +75,10 @@ async def test_poll_status_pending(monkeypatch) -> None:
 
 
 async def test_poll_status_authorized_saves_token(monkeypatch) -> None:
-    _flow_store["flow-2"] = copilot_auth._Flow(device_code="DEV", expires_at=1e18)
+    _flow_store["flow-2"] = copilot_auth._Flow(
+        device_code="DEV",
+        expires_at=1e18,
+    )
 
     async def fake_post(self, url, data=None, headers=None):  # noqa: ANN001
         return httpx.Response(

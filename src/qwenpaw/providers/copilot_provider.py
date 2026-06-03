@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """GitHub Copilot provider.
 
 Authenticates via GitHub OAuth device flow. The long-lived GitHub OAuth token
@@ -23,7 +24,7 @@ from .provider import ModelInfo, Provider
 
 logger = logging.getLogger(__name__)
 
-# --- Copilot endpoints / constants (see decolua/9router for provenance) -------
+# --- Copilot endpoints / constants -------------------------------------------
 COPILOT_API_BASE_URL = "https://api.githubcopilot.com"
 COPILOT_TOKEN_EXCHANGE_URL = "https://api.github.com/copilot_internal/v2/token"
 
@@ -90,6 +91,7 @@ class _CopilotAuthTransport(httpx.AsyncHTTPTransport):
         self,
         request: httpx.Request,
     ) -> httpx.Response:
+        # pylint: disable-next=protected-access
         token = await self._provider._get_copilot_token()
         headers = [
             (k, v)
@@ -169,15 +171,14 @@ class CopilotProvider(Provider):
             }
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
-                    COPILOT_TOKEN_EXCHANGE_URL, headers=headers
+                    COPILOT_TOKEN_EXCHANGE_URL,
+                    headers=headers,
                 )
             if resp.status_code in (401, 403):
-                raise PermissionError(
-                    "GitHub Copilot authorization expired. Please log in again."
-                )
+                raise PermissionError("GitHub Copilot authorization expired.")
             resp.raise_for_status()
             data = resp.json()
-            self._copilot_token = data["token"]
+            self._copilot_token = str(data["token"])
             self._copilot_token_expires_at = float(data["expires_at"])
             return self._copilot_token
 
@@ -228,7 +229,7 @@ class CopilotProvider(Provider):
                         id=model_id,
                         name=getattr(item, "name", None) or model_id,
                         probe_source="documentation",
-                    )
+                    ),
                 )
             return models
         except APIError as exc:
@@ -239,7 +240,8 @@ class CopilotProvider(Provider):
             return []
         except Exception:
             logger.warning(
-                "GitHub Copilot model discovery failed", exc_info=True
+                "GitHub Copilot model discovery failed",
+                exc_info=True,
             )
             return []
 
@@ -257,7 +259,10 @@ class CopilotProvider(Provider):
             res = await client.chat.completions.create(
                 model=model_id,
                 messages=[
-                    {"role": "user", "content": [{"type": "text", "text": "ping"}]}
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "ping"}],
+                    },
                 ],
                 timeout=timeout,
                 max_tokens=20,

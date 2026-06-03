@@ -6,7 +6,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-InsightKind = Literal["person", "task", "meeting", "risk", "decision", "question"]
+InsightKind = Literal[
+    "person",
+    "task",
+    "meeting",
+    "risk",
+    "decision",
+    "question",
+]
 InsightPriority = Literal["P0", "P1", "P2", "P3"]
 InsightStatus = Literal["new", "confirmed", "ignored", "converted"]
 InsightConfidence = Literal["low", "medium", "high"]

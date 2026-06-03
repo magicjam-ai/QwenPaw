@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """GitHub Copilot device-flow OAuth endpoints.
 
 Drives the GitHub OAuth device flow server-side. The resulting long-lived
@@ -20,7 +21,7 @@ from ...providers.provider_manager import ProviderManager
 
 router = APIRouter(prefix="/models", tags=["copilot-oauth"])
 
-# --- GitHub device-flow constants (see decolua/9router) -----------------------
+# --- GitHub device-flow constants --------------------------------------------
 _GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 _GITHUB_SCOPE = "read:user"
 _DEVICE_CODE_URL = "https://github.com/login/device/code"
@@ -120,7 +121,8 @@ async def poll_device_status(
     access_token = data.get("access_token")
     if access_token:
         manager.update_provider(
-            _COPILOT_PROVIDER_ID, {"api_key": access_token}
+            _COPILOT_PROVIDER_ID,
+            {"api_key": access_token},
         )
         _flow_store.pop(flow_id, None)
         return DeviceStatusResponse(status="authorized")
