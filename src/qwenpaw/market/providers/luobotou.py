@@ -94,7 +94,7 @@ def _normalize_search_response(
     )
     total = body.get("total")
     total_value = total if isinstance(total, int) else None
-    has_more = bool(body.get("has_more") or body.get("hasMore") or False)
+    has_more = bool(body.get("has_more") or body.get("hasMore"))
     if total_value is not None:
         has_more = page * max(1, limit) < total_value
     return items, total_value, has_more

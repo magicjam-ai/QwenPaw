@@ -142,7 +142,9 @@ def load_product_bundle(path: str | Path) -> ProductBundle:
     except OSError as exc:
         raise ValueError(f"Cannot read product bundle: {bundle_path}") from exc
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON product bundle: {bundle_path}") from exc
+        raise ValueError(
+            f"Invalid JSON product bundle: {bundle_path}",
+        ) from exc
     try:
         return ProductBundle.model_validate(data)
     except ValidationError as exc:
@@ -239,7 +241,7 @@ def _apply_skillhub(
     save_product_settings(settings)
 
 
-def _apply_models(
+def _apply_models(  # pylint: disable=too-many-branches
     models: list[BundleModel],
     *,
     dry_run: bool,
@@ -294,7 +296,10 @@ def _apply_models(
             if not dry_run:
                 provider.name = spec.display_name
 
-        if spec.base_url and getattr(provider, "base_url", "") != spec.base_url:
+        if (
+            spec.base_url
+            and getattr(provider, "base_url", "") != spec.base_url
+        ):
             changes.append(
                 BundleChange(
                     "update",
@@ -355,7 +360,9 @@ def _activate_model_if_needed(
             ),
         )
         if not dry_run:
-            asyncio.run(manager.activate_model(desired.provider_id, desired.model))
+            asyncio.run(
+                manager.activate_model(desired.provider_id, desired.model),
+            )
         return
 
     if not spec.agent_id:
@@ -453,7 +460,11 @@ def _apply_agents(
         changed = False
         if agent_config.name != spec.name:
             changes.append(
-                BundleChange("update", f"agents.{spec.agent_id}.name", spec.name),
+                BundleChange(
+                    "update",
+                    f"agents.{spec.agent_id}.name",
+                    spec.name,
+                ),
             )
             agent_config.name = spec.name
             changed = True
@@ -467,12 +478,19 @@ def _apply_agents(
             )
             agent_config.description = spec.description
             changed = True
-        if spec.active_model and agent_config.active_model != spec.active_model:
+        if (
+            spec.active_model
+            and agent_config.active_model != spec.active_model
+        ):
+            active_model_id = (
+                f"{spec.active_model.provider_id}/"
+                f"{spec.active_model.model}"
+            )
             changes.append(
                 BundleChange(
                     "activate",
                     f"agents.{spec.agent_id}.active_model",
-                    f"{spec.active_model.provider_id}/{spec.active_model.model}",
+                    active_model_id,
                 ),
             )
             agent_config.active_model = spec.active_model
@@ -525,7 +543,8 @@ async def _apply_skills(
         agent_ids = spec.agents or [
             agent.agent_id
             for agent in bundle.agents
-            if spec.id in agent.skills or (spec.name and spec.name in agent.skills)
+            if spec.id in agent.skills
+            or (spec.name and spec.name in agent.skills)
         ]
         for agent_id in agent_ids:
             _ensure_workspace_skill(
@@ -550,7 +569,9 @@ async def _ensure_inline_pool_skill(
     manifest = read_skill_pool_manifest()
     if skill_name in manifest.get("skills", {}):
         return
-    changes.append(BundleChange("create", f"skills.pool.{skill_name}", "inline"))
+    changes.append(
+        BundleChange("create", f"skills.pool.{skill_name}", "inline"),
+    )
     if dry_run:
         return
     content = spec.content or _default_skill_content(skill_name)
@@ -577,7 +598,9 @@ async def _ensure_hub_pool_skill(
     if skill_name in manifest.get("skills", {}):
         return
     bundle_url = spec.bundle_url or _skillhub_bundle_url(skillhub, spec.id)
-    changes.append(BundleChange("import", f"skills.pool.{skill_name}", bundle_url))
+    changes.append(
+        BundleChange("import", f"skills.pool.{skill_name}", bundle_url),
+    )
     if dry_run:
         return
     await import_pool_skill_from_hub(
@@ -640,7 +663,11 @@ def _ensure_workspace_skill(
     entry = workspace_manifest.get("skills", {}).get(skill_name)
     if entry is None:
         changes.append(
-            BundleChange("install", f"agents.{agent_id}.skills.{skill_name}", "pool"),
+            BundleChange(
+                "install",
+                f"agents.{agent_id}.skills.{skill_name}",
+                "pool",
+            ),
         )
         if not dry_run:
             pool_service.download_to_workspace(
@@ -648,10 +675,18 @@ def _ensure_workspace_skill(
                 workspace_dir=workspace_dir,
                 overwrite=False,
             )
-            entry = read_skill_manifest(workspace_dir).get("skills", {}).get(skill_name)
+            entry = (
+                read_skill_manifest(workspace_dir)
+                .get("skills", {})
+                .get(skill_name)
+            )
     if enabled and entry is not None and not bool(entry.get("enabled", False)):
         changes.append(
-            BundleChange("enable", f"agents.{agent_id}.skills.{skill_name}", ""),
+            BundleChange(
+                "enable",
+                f"agents.{agent_id}.skills.{skill_name}",
+                "",
+            ),
         )
         if not dry_run:
             from ..agents.skill_system.workspace_service import SkillService
@@ -659,7 +694,10 @@ def _ensure_workspace_skill(
             SkillService(workspace_dir).enable_skill(skill_name)
 
 
-def _skillhub_bundle_url(skillhub: BundleSkillHub | None, skill_id: str) -> str:
+def _skillhub_bundle_url(
+    skillhub: BundleSkillHub | None,
+    skill_id: str,
+) -> str:
     if skillhub is None or skillhub.base_url is None:
         raise ValueError(
             "skillhub.base_url or skills[].bundle_url is required for "

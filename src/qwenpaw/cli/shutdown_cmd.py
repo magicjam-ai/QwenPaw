@@ -136,9 +136,14 @@ def _find_windows_wrapper_ancestor_pids(pids: set[int]) -> set[int]:
             if info is None:
                 break
 
-            parent_pid = info[0]
-            if parent_pid in (None, 0) or parent_pid in visited:
+            raw_parent_pid = info[0]
+            if (
+                not isinstance(raw_parent_pid, int)
+                or raw_parent_pid == 0
+                or raw_parent_pid in visited
+            ):
                 break
+            parent_pid = raw_parent_pid
             visited.add(parent_pid)
 
             parent_info = snapshot.get(parent_pid)

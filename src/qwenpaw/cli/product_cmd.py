@@ -32,7 +32,11 @@ def product_group() -> None:
     is_flag=True,
     help="Print machine-readable JSON output.",
 )
-def apply_bundle_cmd(bundle_path: Path, dry_run: bool, json_output: bool) -> None:
+def apply_bundle_cmd(
+    bundle_path: Path,
+    dry_run: bool,
+    json_output: bool,
+) -> None:
     """Apply an idempotent product bundle manifest."""
     try:
         bundle = load_product_bundle(bundle_path)

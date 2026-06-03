@@ -152,7 +152,9 @@ async def test_analyze_today_hides_lark_ids_from_key_people(tmp_path):
 
     radar = await service.analyze_today(date="2026-06-02")
 
-    assert [person.title for person in radar.sections.key_people] == ["Alice Zhang"]
+    assert [person.title for person in radar.sections.key_people] == [
+        "Alice Zhang",
+    ]
     assert radar.sections.questions[0].related_people == ["Alice Zhang"]
 
 
@@ -177,7 +179,10 @@ async def test_analyze_today_hides_lark_ids_from_risk_titles(tmp_path):
 
     radar = await service.analyze_today(date="2026-06-02")
 
-    assert radar.sections.risks[0].title == "Build is blocked by deployment access"
+    assert (
+        radar.sections.risks[0].title
+        == "Build is blocked by deployment access"
+    )
     assert "oc_" not in radar.sections.risks[0].title
 
 
@@ -246,7 +251,9 @@ async def test_analyze_today_does_not_treat_owner_only_as_question(tmp_path):
 
     radar = await service.analyze_today(date="2026-06-02")
 
-    assert [item.title for item in radar.sections.questions] == ["Release thread"]
+    assert [item.title for item in radar.sections.questions] == [
+        "Release thread",
+    ]
 
 
 @pytest.mark.asyncio
@@ -289,7 +296,9 @@ async def test_update_insight_status_persists_actions(tmp_path):
     assert ignored.status == "ignored"
     assert converted.status == "converted"
     assert persisted.sections.key_tasks[0].status == "converted"
-    assert (tmp_path / ".workbench" / "issues" / f"{insight_id}.json").is_file()
+    assert (
+        tmp_path / ".workbench" / "issues" / f"{insight_id}.json"
+    ).is_file()
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
 """Export QwenPaw FastAPI OpenAPI schema as JSON."""
 
 from __future__ import annotations
