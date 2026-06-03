@@ -141,7 +141,11 @@ class LazyGroup(click.Group):
             "plugin",
             ".plugin_commands",
         ),
-        "product": ("qwenpaw.cli.product_cmd", "product_group", ".product_cmd"),
+        "product": (
+            "qwenpaw.cli.product_cmd",
+            "product_group",
+            ".product_cmd",
+        ),
         "task": ("qwenpaw.cli.task_cmd", "task_cmd", ".task_cmd"),
         "doctor": ("qwenpaw.cli.doctor_cmd", "doctor_cmd", ".doctor_cmd"),
     },

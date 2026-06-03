@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
 """Apply or preview a QwenPaw product bundle."""
 
 from __future__ import annotations
