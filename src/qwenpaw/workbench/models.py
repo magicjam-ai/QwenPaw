@@ -6,7 +6,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-InsightKind = Literal["person", "task", "meeting", "risk", "decision", "question"]
+InsightKind = Literal[
+    "person",
+    "task",
+    "meeting",
+    "risk",
+    "decision",
+    "question",
+]
 InsightPriority = Literal["P0", "P1", "P2", "P3"]
 InsightStatus = Literal["new", "confirmed", "ignored", "converted"]
 InsightConfidence = Literal["low", "medium", "high"]
@@ -33,7 +40,7 @@ class WorkbenchLarkIntegrationConfig(BaseModel):
             "overdue",
             "延期",
             "待确认",
-            "owner",
+            "confirm",
         ],
     )
 
@@ -145,6 +152,13 @@ class WorkbenchCollectRequest(BaseModel):
     records: list[WorkbenchRawRecord] = Field(default_factory=list)
 
 
+class WorkbenchCollectionIssue(BaseModel):
+    source: str
+    message: str
+    recovery_actions: list[str] = Field(default_factory=list)
+    code: str | None = None
+
+
 class WorkbenchAnalyzeRequest(BaseModel):
     date: str | None = None
 
@@ -160,6 +174,9 @@ class WorkbenchCollectResponse(BaseModel):
     collection_errors: dict[str, str] = Field(default_factory=dict)
     collection_diagnostics: list[WorkbenchCollectionDiagnostic] = Field(
         default_factory=list,
+    )
+    collection_issues: dict[str, WorkbenchCollectionIssue] = Field(
+        default_factory=dict,
     )
 
 

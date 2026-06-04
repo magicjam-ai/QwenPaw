@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
+# pylint: disable=redefined-outer-name
 from __future__ import annotations
 
 import json
 import sys
 import types
+from collections.abc import Generator
 from dataclasses import dataclass
 from importlib import util
 from pathlib import Path
@@ -15,6 +17,7 @@ from fastapi.testclient import TestClient
 from qwenpaw.app import inbox_store
 from qwenpaw.workbench.models import WorkbenchCollectionDiagnostic
 from qwenpaw.workbench import service as workbench_service_module
+from qwenpaw.workbench.models import WorkbenchCollectionIssue
 from qwenpaw.workbench.service import WorkbenchService
 from qwenpaw.workbench.store import WorkbenchStore
 
@@ -32,10 +35,10 @@ class FakeCollector:
     async def collect(
         self,
         *,
-        date: str,
-        config,
-        sources=None,
-        chat_keywords=None,
+        date: str,  # pylint: disable=unused-argument
+        config,  # pylint: disable=unused-argument
+        sources=None,  # pylint: disable=unused-argument
+        chat_keywords=None,  # pylint: disable=unused-argument
     ):
         return [
             {
@@ -53,17 +56,32 @@ class FailingCollector:
     def __init__(self):
         self.last_errors: dict[str, str] = {}
         self.last_diagnostics: list[WorkbenchCollectionDiagnostic] = []
+        self.last_error_details: dict[str, WorkbenchCollectionIssue] = {}
 
     async def collect(
         self,
         *,
-        date: str,
-        config,
-        sources=None,
-        chat_keywords=None,
+        date: str,  # pylint: disable=unused-argument
+        config,  # pylint: disable=unused-argument
+        sources=None,  # pylint: disable=unused-argument
+        chat_keywords=None,  # pylint: disable=unused-argument
     ):
+        auth_error = (
+            "need_user_authorization: calendar:" + "calendar.event:read"
+        )
         self.last_errors = {
-            "calendar": "need_user_authorization: calendar:calendar.event:read",
+            "calendar": auth_error,
+        }
+        self.last_error_details = {
+            "calendar": WorkbenchCollectionIssue(
+                source="calendar",
+                message=auth_error,
+                code="need_user_authorization",
+                recovery_actions=[
+                    "运行 `lark-cli auth login --as user` 重新登录飞书用户身份。",
+                    "确认已授予日历权限后，点击“重新采集”。",
+                ],
+            ),
         }
         self.last_diagnostics = [
             WorkbenchCollectionDiagnostic(
@@ -81,7 +99,13 @@ def _load_workbench_router():
     if routers_pkg_name not in sys.modules:
         routers_pkg = types.ModuleType(routers_pkg_name)
         routers_pkg.__path__ = [
-            str(Path(__file__).parents[2] / "src" / "qwenpaw" / "app" / "routers"),
+            str(
+                Path(__file__).parents[2]
+                / "src"
+                / "qwenpaw"
+                / "app"
+                / "routers",
+            ),
         ]
         sys.modules[routers_pkg_name] = routers_pkg
 
@@ -120,7 +144,7 @@ def _workbench_root(working_dir: Path) -> Path:
 def workbench_client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> WorkbenchClient:
+) -> Generator[WorkbenchClient, None, None]:
     working_dir = tmp_path / "working"
     working_dir.mkdir()
     monkeypatch.setattr(
@@ -171,7 +195,9 @@ def test_workbench_config_and_init_contract(
         "issues",
         "issues/active",
     ):
-        assert (_workbench_root(workbench_client.working_dir) / rel_path).is_dir()
+        assert (
+            _workbench_root(workbench_client.working_dir) / rel_path
+        ).is_dir()
 
 
 @pytest.mark.integration
@@ -402,3 +428,10 @@ def test_workbench_live_collect_returns_collection_errors(
             "message": "need_user_authorization: calendar:calendar.event:read",
         },
     ]
+    assert payload["collection_issues"]["calendar"]["code"] == (
+        "need_user_authorization"
+    )
+    assert (
+        "auth login"
+        in payload["collection_issues"]["calendar"]["recovery_actions"][0]
+    )

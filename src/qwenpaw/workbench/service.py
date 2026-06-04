@@ -4,8 +4,8 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from datetime import datetime, time
-from typing import Iterable
 
 from ..constant import WORKING_DIR
 from .models import (
@@ -15,6 +15,7 @@ from .models import (
     WorkbenchCollectionDiagnostic,
     WorkbenchCollectMode,
     WorkbenchCollectSource,
+    WorkbenchCollectionIssue,
     InsightStatus,
     WorkbenchConfig,
     WorkbenchDailyRadarScheduleConfig,
@@ -43,7 +44,12 @@ def _today() -> str:
     return datetime.now().astimezone().date().isoformat()
 
 
-def _insight_id(kind: str, source_type: str, source_id: str, title: str) -> str:
+def _insight_id(
+    kind: str,
+    source_type: str,
+    source_id: str,
+    title: str,
+) -> str:
     key = f"{kind}:{source_type}:{source_id}:{title}".encode("utf-8")
     digest = hashlib.sha1(key).hexdigest()[:12]
     return f"{kind}-{digest}"
@@ -107,7 +113,7 @@ def _target_day_bounds(date: str) -> tuple[datetime, datetime]:
 
 def _is_raw_identifier(value: str) -> bool:
     lowered = value.lower()
-    return lowered.startswith(("ou_", "cli_", "open_", "user_", "union_"))
+    return lowered.startswith(("ou_", "on_", "oc_", "om_", "cli_", "open_", "user_", "union_"))
 
 
 def _sanitize_visible_text(value: str) -> str:
@@ -121,7 +127,7 @@ def _sanitize_visible_text(value: str) -> str:
 def _clean_people(people: Iterable[str]) -> list[str]:
     cleaned: list[str] = []
     for person in people:
-        value = person.strip()
+        value = _sanitize_visible_text(person.strip())
         if not value or _is_raw_identifier(value):
             continue
         if value not in cleaned:
@@ -129,9 +135,53 @@ def _clean_people(people: Iterable[str]) -> list[str]:
     return cleaned
 
 
+def _displayable_person_name(value: str) -> str:
+    person = _sanitize_visible_text(value)
+    if not person or _is_raw_identifier(person):
+        return ""
+    if re.match(r"^[A-Za-z0-9_-]{24,}$", person):
+        return ""
+    return person
+
+
+def _displayable_title(title: str, summary: str, fallback: str) -> str:
+    value = _sanitize_visible_text(title)
+    if value and not _is_raw_identifier(value):
+        return value
+    summary_title = " ".join(_sanitize_visible_text(summary).split())
+    return summary_title[:80] or fallback
+
+
+def _same_date(value: str | None, date: str) -> bool:
+    if not value:
+        return False
+    return value[:10] == date
+
+
+def _same_or_before_date(value: str | None, date: str) -> bool:
+    if not value:
+        return False
+    return value[:10] <= date
+
+
+def _record_relevant_for_date(record: WorkbenchRawRecord, date: str) -> bool:
+    if record.source_type == "lark_message":
+        return _same_date(record.created_at, date)
+    if record.source_type == "lark_calendar":
+        return _same_date(record.starts_at, date)
+    if record.source_type == "lark_task":
+        return not record.due_at or _same_or_before_date(record.due_at, date)
+    return True
+
+
 def _is_broadcast_task(record: WorkbenchRawRecord) -> bool:
     text = f"{record.title} {record.summary}"
-    return any(marker in text for marker in ("@所有人", "@all", "@ All", "所有人"))
+    return _is_broadcast_text(text)
+
+
+def _is_broadcast_text(text: str) -> bool:
+    lowered = text.lower()
+    return "@_all" in lowered or "@所有人" in text or "@all" in lowered or "所有人" in text
 
 
 def _is_stale_task(record: WorkbenchRawRecord, target_date: str) -> bool:
@@ -181,12 +231,37 @@ def _is_failed_ci_message(text: str) -> bool:
     )
 
 
+def _is_risk_record(record: WorkbenchRawRecord, date: str) -> bool:
+    text = f"{record.title} {record.summary}"
+    if _is_broadcast_text(text) or not _record_relevant_for_date(record, date):
+        return False
+    return _is_failed_ci_message(text) or _contains_any(
+        text,
+        ("blocked", "blocker", "overdue", "延期"),
+    )
+
+
+def _is_question_record(record: WorkbenchRawRecord, date: str) -> bool:
+    text = f"{record.title} {record.summary}"
+    if (
+        _is_broadcast_text(text)
+        or not _record_relevant_for_date(record, date)
+        or _is_success_ci_message(text)
+    ):
+        return False
+    lowered = text.lower()
+    return _contains_any(text, ("owner", "待确认", "需要确认")) or bool(
+        re.search(r"\bconfirm(?:ation)?\b", lowered),
+    )
+
+
 class WorkbenchService:
     def __init__(self, store: WorkbenchStore, lark_collector=None):
         self.store = store
         self.lark_collector = lark_collector
         self.last_collection_errors: dict[str, str] = {}
         self.last_collection_diagnostics: list[WorkbenchCollectionDiagnostic] = []
+        self.last_collection_issues: dict[str, WorkbenchCollectionIssue] = {}
 
     def default_config(self) -> WorkbenchConfig:
         return WorkbenchConfig(
@@ -253,7 +328,7 @@ class WorkbenchService:
     async def collect(
         self,
         *,
-        records: list[dict | WorkbenchRawRecord],
+        records: Sequence[dict | WorkbenchRawRecord],
         date: str | None = None,
         mode: WorkbenchCollectMode = "manual",
         sources: list[WorkbenchCollectSource] | None = None,
@@ -262,6 +337,7 @@ class WorkbenchService:
         target_date = date or _today()
         self.last_collection_errors = {}
         self.last_collection_diagnostics = []
+        self.last_collection_issues = {}
         if mode == "live":
             config = await self.get_config()
             collector = self._get_lark_collector()
@@ -278,6 +354,9 @@ class WorkbenchService:
             self.last_collection_diagnostics = list(
                 getattr(collector, "last_diagnostics", []) or [],
             )
+            self.last_collection_issues = dict(
+                getattr(collector, "last_error_details", {}) or {},
+            )
         else:
             self.last_collection_diagnostics = [
                 WorkbenchCollectionDiagnostic(
@@ -288,9 +367,11 @@ class WorkbenchService:
                 ),
             ]
         normalized = [
-            record
-            if isinstance(record, WorkbenchRawRecord)
-            else WorkbenchRawRecord(**record)
+            (
+                record
+                if isinstance(record, WorkbenchRawRecord)
+                else WorkbenchRawRecord(**record)
+            )
             for record in records
         ]
         stamped = [
@@ -363,20 +444,11 @@ class WorkbenchService:
         question_records: list[WorkbenchRawRecord] = []
 
         for record in records:
-            clean_people = _clean_people(record.people)
-            for person in clean_people:
-                if person.strip():
-                    people_counter[person.strip()] += 1
-            text = f"{record.title} {record.summary}"
-            if _is_failed_ci_message(text) or _contains_any(
-                text,
-                ("blocked", "blocker", "overdue", "延期"),
-            ):
+            for person in _clean_people(record.people):
+                people_counter[person] += 1
+            if _is_risk_record(record, date):
                 risk_records.append(record)
-            if (
-                not _is_success_ci_message(text)
-                and _contains_any(text, ("confirm", "待确认", "需要确认", "owner"))
-            ):
+            if _is_question_record(record, date):
                 question_records.append(record)
             if record.source_type == "lark_task":
                 if not _is_stale_task(record, date) and not _is_broadcast_task(record):
@@ -446,7 +518,11 @@ class WorkbenchService:
                 record.title,
             ),
             kind=kind,  # type: ignore[arg-type]
-            title=_sanitize_visible_text(record.title) or record.source_id or kind,
+            title=_displayable_title(
+                record.title,
+                record.summary,
+                record.source_id or kind,
+            ),
             summary=_sanitize_visible_text(record.summary),
             priority=priority,  # type: ignore[arg-type]
             confidence="medium",

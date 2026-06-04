@@ -20,6 +20,7 @@ from ..constant import SECRET_DIR
 from ..config.config import ModelSlotConfig
 from ..exceptions import ProviderError
 from .anthropic_provider import AnthropicProvider
+from .copilot_provider import CopilotProvider, COPILOT_API_BASE_URL
 from .gemini_provider import GeminiProvider
 from .ollama_provider import OllamaProvider
 from .openai_provider import OpenAIProvider
@@ -922,6 +923,21 @@ PROVIDER_ANTHROPIC = AnthropicProvider(
     freeze_url=False,
 )
 
+PROVIDER_GITHUB_COPILOT = CopilotProvider(
+    id="github-copilot",
+    name="GitHub Copilot",
+    base_url=COPILOT_API_BASE_URL,
+    chat_model="OpenAIChatModel",
+    auth_mode="auth_token",
+    freeze_url=True,
+    require_api_key=True,
+    api_key_prefix="",
+    support_model_discovery=True,
+    support_connection_check=True,
+    models=[],
+    meta={"auth_flow": "github-device-code"},
+)
+
 PROVIDER_GEMINI = GeminiProvider(
     id="gemini",
     name="Google Gemini",
@@ -1057,6 +1073,7 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self._add_builtin(PROVIDER_OPENAI)
         self._add_builtin(PROVIDER_AZURE_OPENAI)
         self._add_builtin(PROVIDER_ANTHROPIC)
+        self._add_builtin(PROVIDER_GITHUB_COPILOT)
         self._add_builtin(PROVIDER_GEMINI)
         self._add_builtin(PROVIDER_DEEPSEEK)
         self._add_builtin(PROVIDER_KIMI_CN)

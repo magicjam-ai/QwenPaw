@@ -11,11 +11,13 @@ from __future__ import annotations
 from .aliyun import provider as _aliyun_provider
 from .base import MarketProvider
 from .clawhub import provider as _clawhub_provider
+from .luobotou import provider as _luobotou_provider
 from .modelscope import provider as _modelscope_provider
 
 
 PROVIDERS: dict[str, MarketProvider] = {
     _clawhub_provider.key: _clawhub_provider,
+    _luobotou_provider.key: _luobotou_provider,
     _modelscope_provider.key: _modelscope_provider,
     _aliyun_provider.key: _aliyun_provider,
 }

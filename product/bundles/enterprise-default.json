@@ -1,0 +1,48 @@
+{
+  "bundle_id": "enterprise-default",
+  "version": "2026.05.28",
+  "skillhub": {
+    "base_url": "https://skillhub.luobotou.ai",
+    "label": "LuoBotou SkillHub",
+    "channels": ["official", "enterprise"],
+    "search_path": "/api/v1/search",
+    "bundle_url_template": "{base_url}/api/v1/skills/{id}"
+  },
+  "models": [
+    {
+      "provider_id": "deepseek",
+      "display_name": "DeepSeek",
+      "default_model": "deepseek-chat",
+      "scope": "global"
+    }
+  ],
+  "agents": [
+    {
+      "agent_id": "enterprise",
+      "name": "企业助手",
+      "description": "企业知识、文档和会议任务的默认助手。",
+      "language": "zh",
+      "skills": ["enterprise-search", "document-draft", "meeting-summary"]
+    }
+  ],
+  "skills": [
+    {
+      "id": "enterprise-search",
+      "source": "inline",
+      "enabled": true,
+      "content": "---\nname: enterprise-search\ndescription: Search enterprise knowledge bases and internal documents.\n---\n\n# Enterprise Search\n\nUse this skill when the user asks for internal knowledge, policy, project, or document lookup.\n"
+    },
+    {
+      "id": "document-draft",
+      "source": "inline",
+      "enabled": true,
+      "content": "---\nname: document-draft\ndescription: Draft structured enterprise documents from user requirements.\n---\n\n# Document Draft\n\nUse this skill when the user needs proposals, reports, memos, SOPs, or product documents.\n"
+    },
+    {
+      "id": "meeting-summary",
+      "source": "inline",
+      "enabled": true,
+      "content": "---\nname: meeting-summary\ndescription: Summarize meetings into decisions, action items, owners, and risks.\n---\n\n# Meeting Summary\n\nUse this skill when the user provides meeting notes, transcripts, or recordings and asks for a concise follow-up summary.\n"
+    }
+  ]
+}

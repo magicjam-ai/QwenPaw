@@ -157,6 +157,7 @@ async def test_analyze_today_builds_radar_from_lark_shaped_raw_records(
                 "summary": "Need confirm owner for overdue task",
                 "people": ["Bob"],
                 "projects": ["Workbench"],
+                "created_at": "2026-06-02T09:00:00+08:00",
             },
         ],
         date="2026-06-02",
@@ -228,6 +229,7 @@ async def test_analyze_today_applies_prd_data_quality_rules(tmp_path):
                 "title": "Pipeline Build Success",
                 "summary": "Owner cli_hidden confirmed artifact URL",
                 "people": ["cli_hidden"],
+                "created_at": "2026-06-02T09:00:00+08:00",
             },
             {
                 "source_type": "lark_message",
@@ -235,6 +237,7 @@ async def test_analyze_today_applies_prd_data_quality_rules(tmp_path):
                 "title": "Pipeline Build Failed",
                 "summary": "Failed stage deploy blocked release owner Alice(ou_hidden)",
                 "people": ["Alice"],
+                "created_at": "2026-06-02T09:00:00+08:00",
             },
         ],
         date="2026-06-02",
@@ -267,6 +270,37 @@ async def test_analyze_today_applies_prd_data_quality_rules(tmp_path):
         for person in item.related_people
     )
     assert {item.title for item in radar.sections.key_people} >= {"Alice", "Bob"}
+
+
+@pytest.mark.asyncio
+async def test_analyze_today_hides_lark_ids_from_key_people(tmp_path):
+    store = WorkbenchStore(tmp_path)
+    service = WorkbenchService(store)
+    await service.init_workbench()
+    await service.collect(
+        records=[
+            {
+                "source_type": "lark_message",
+                "source_id": "msg-1",
+                "title": "Message from Alice",
+                "summary": "Confirm owner",
+                "people": [
+                    "ou_894a8df1ee4f2cfadfc6bb20477a8fd1",
+                    "cli_a83d699ef76e5013",
+                    "Alice Zhang",
+                ],
+                "created_at": "2026-06-02T09:00:00+08:00",
+            },
+        ],
+        date="2026-06-02",
+    )
+
+    radar = await service.analyze_today(date="2026-06-02")
+
+    assert [person.title for person in radar.sections.key_people] == [
+        "Alice Zhang",
+    ]
+    assert radar.sections.questions[0].related_people == ["Alice Zhang"]
 
 
 @pytest.mark.asyncio
@@ -309,6 +343,104 @@ async def test_analyze_today_exports_smart_workbench_sot(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_analyze_today_hides_lark_ids_from_risk_titles(tmp_path):
+    store = WorkbenchStore(tmp_path)
+    service = WorkbenchService(store)
+    await service.init_workbench()
+    await service.collect(
+        records=[
+            {
+                "source_type": "lark_message",
+                "source_id": "msg-1",
+                "title": "oc_6aa98f66b940c25eba13cb7bf8340f1d",
+                "summary": "Build is blocked by deployment access",
+                "people": ["Alice Zhang"],
+                "created_at": "2026-06-02T09:00:00+08:00",
+            },
+        ],
+        date="2026-06-02",
+    )
+
+    radar = await service.analyze_today(date="2026-06-02")
+
+    assert (
+        radar.sections.risks[0].title
+        == "Build is blocked by deployment access"
+    )
+    assert "oc_" not in radar.sections.risks[0].title
+
+
+@pytest.mark.asyncio
+async def test_analyze_today_excludes_broadcast_and_stale_chat_risks(tmp_path):
+    store = WorkbenchStore(tmp_path)
+    service = WorkbenchService(store)
+    await service.init_workbench()
+    await service.collect(
+        records=[
+            {
+                "source_type": "lark_message",
+                "source_id": "msg-all",
+                "title": "Release group",
+                "summary": "@_all Build is blocked by deployment access",
+                "created_at": "2026-06-02T09:00:00+08:00",
+            },
+            {
+                "source_type": "lark_message",
+                "source_id": "msg-old",
+                "title": "Old group",
+                "summary": "Need confirm owner for overdue task",
+                "created_at": "2026-05-01T09:00:00+08:00",
+            },
+            {
+                "source_type": "lark_message",
+                "source_id": "msg-today",
+                "title": "Today group",
+                "summary": "Need confirm owner for blocked task",
+                "created_at": "2026-06-02T09:00:00+08:00",
+            },
+        ],
+        date="2026-06-02",
+    )
+
+    radar = await service.analyze_today(date="2026-06-02")
+
+    assert [item.title for item in radar.sections.risks] == ["Today group"]
+    assert [item.title for item in radar.sections.questions] == ["Today group"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_today_does_not_treat_owner_only_as_question(tmp_path):
+    store = WorkbenchStore(tmp_path)
+    service = WorkbenchService(store)
+    await service.init_workbench()
+    await service.collect(
+        records=[
+            {
+                "source_type": "lark_message",
+                "source_id": "msg-owner",
+                "title": "Branch Build IMG",
+                "summary": "Owner: ds.spe.account.s [OK]Build Success",
+                "created_at": "2026-06-02T09:00:00+08:00",
+            },
+            {
+                "source_type": "lark_message",
+                "source_id": "msg-confirm",
+                "title": "Release thread",
+                "summary": "Please confirm release owner",
+                "created_at": "2026-06-02T10:00:00+08:00",
+            },
+        ],
+        date="2026-06-02",
+    )
+
+    radar = await service.analyze_today(date="2026-06-02")
+
+    assert [item.title for item in radar.sections.questions] == [
+        "Release thread",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_update_insight_status_persists_actions(tmp_path):
     store = WorkbenchStore(tmp_path)
     service = WorkbenchService(store)
@@ -348,7 +480,9 @@ async def test_update_insight_status_persists_actions(tmp_path):
     assert ignored.status == "ignored"
     assert converted.status == "converted"
     assert persisted.sections.key_tasks[0].status == "converted"
-    assert (tmp_path / ".workbench" / "issues" / f"{insight_id}.json").is_file()
+    assert (
+        tmp_path / ".workbench" / "issues" / f"{insight_id}.json"
+    ).is_file()
 
 
 @pytest.mark.asyncio

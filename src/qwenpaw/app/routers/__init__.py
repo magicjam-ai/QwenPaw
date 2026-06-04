@@ -33,6 +33,7 @@ from .git import router as git_router
 from .coding_project import router as coding_project_router
 from .access_control import router as access_control_router
 from .workbench import router as workbench_router
+from .copilot_auth import router as copilot_auth_router
 
 router = APIRouter()
 
@@ -45,6 +46,7 @@ router.include_router(mcp_oauth_router)
 router.include_router(mcp_router)
 router.include_router(messages_router)
 router.include_router(providers_router)
+router.include_router(copilot_auth_router)
 router.include_router(runner_router)
 router.include_router(market_router)
 router.include_router(skills_router)
