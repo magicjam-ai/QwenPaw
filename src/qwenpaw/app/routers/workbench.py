@@ -10,6 +10,8 @@ from ...workbench.models import (
     WorkbenchCollectRequest,
     WorkbenchCollectResponse,
     WorkbenchConfig,
+    WorkbenchConfigUpdateRequest,
+    WorkbenchDailyRadarScheduleResponse,
     WorkbenchInsightActionRequest,
     WorkbenchInsightActionResponse,
 )
@@ -23,9 +25,47 @@ async def get_workbench_config() -> WorkbenchConfig:
     return await get_workbench_service().get_config()
 
 
+@router.patch("/config", response_model=WorkbenchConfig)
+async def patch_workbench_config(
+    payload: WorkbenchConfigUpdateRequest,
+) -> WorkbenchConfig:
+    return await get_workbench_service().update_config(
+        daily_radar_schedule=payload.daily_radar_schedule,
+    )
+
+
 @router.post("/init", response_model=WorkbenchConfig)
 async def post_workbench_init() -> WorkbenchConfig:
     return await get_workbench_service().init_workbench()
+
+
+@router.post(
+    "/schedule/daily-radar/ensure",
+    response_model=WorkbenchDailyRadarScheduleResponse,
+)
+async def ensure_daily_radar() -> WorkbenchDailyRadarScheduleResponse:
+    (
+        schedule,
+        created,
+        updated,
+    ) = await get_workbench_service().ensure_daily_radar_schedule()
+    return WorkbenchDailyRadarScheduleResponse(
+        schedule=schedule,
+        created=created,
+        updated=updated,
+    )
+
+
+@router.post(
+    "/schedule/daily-radar/disable",
+    response_model=WorkbenchDailyRadarScheduleResponse,
+)
+async def disable_daily_radar() -> WorkbenchDailyRadarScheduleResponse:
+    schedule = await get_workbench_service().disable_daily_radar_schedule()
+    return WorkbenchDailyRadarScheduleResponse(
+        schedule=schedule,
+        updated=True,
+    )
 
 
 @router.get("/radar/today", response_model=DailyRadar)
@@ -58,6 +98,7 @@ async def post_workbench_collect(
         coverage=coverage,
         collection_errors=service.last_collection_errors,
         collection_diagnostics=service.last_collection_diagnostics,
+        collection_issues=service.last_collection_issues,
     )
 
 
@@ -83,7 +124,16 @@ async def post_workbench_analyze(
             f"{len(radar.highlights)} highlight(s), "
             f"{len(radar.sections.risks)} risk(s)."
         ),
-        payload={"date": radar.date, "generated_at": radar.generated_at},
+        payload={
+            "date": radar.date,
+            "generated_at": radar.generated_at,
+            "coverage": radar.coverage.model_dump(mode="json"),
+            "counts": {
+                "highlights": len(radar.highlights),
+                "risks": len(radar.sections.risks),
+                "questions": len(radar.sections.questions),
+            },
+        },
     )
     return WorkbenchAnalyzeResponse(radar=radar)
 

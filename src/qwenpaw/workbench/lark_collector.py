@@ -6,6 +6,8 @@ import json
 import os
 import re
 import shutil
+import sys
+import time as time_module
 from collections.abc import Iterable
 from datetime import date as date_type
 from datetime import datetime, time, timedelta
@@ -15,6 +17,7 @@ from typing import Any, Protocol
 import httpx
 
 from .models import (
+    WorkbenchCollectionDiagnostic,
     WorkbenchCollectionIssue,
     WorkbenchLarkIntegrationConfig,
     WorkbenchRawRecord,
@@ -71,16 +74,28 @@ class LarkCommandError(RuntimeError):
 
 
 class LarkCommandRunner:
-    def __init__(self, timeout_seconds: float = 20.0):
+    def __init__(
+        self,
+        *,
+        auth_check_dir: str | Path | None = None,
+        auth_cache_ttl_seconds: int = 300,
+        timeout_seconds: float = 20.0,
+    ):
+        self.auth_check_dir = Path(auth_check_dir) if auth_check_dir else None
+        self.auth_cache_ttl_seconds = auth_cache_ttl_seconds
         self.timeout_seconds = timeout_seconds
+        self._auth_env_cache: dict[str, str] | None = None
+        self._auth_checked_at = 0.0
 
     async def run_json(self, argv: list[str]) -> Any:
+        env = await self._authenticated_env()
         executable = shutil.which(argv[0]) or argv[0]
         process = await asyncio.create_subprocess_exec(
             executable,
             *argv[1:],
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -126,6 +141,94 @@ class LarkCommandRunner:
             )
         return (
             payload if payload is not None else _parse_json_output(stdout_text)
+        )
+
+    async def _authenticated_env(self) -> dict[str, str]:
+        auth_env = await self._load_lark_auth_env()
+        env = os.environ.copy()
+        env.update(auth_env)
+        return env
+
+    async def _load_lark_auth_env(self) -> dict[str, str]:
+        now = time_module.monotonic()
+        if (
+            self._auth_env_cache is not None
+            and now - self._auth_checked_at < self.auth_cache_ttl_seconds
+        ):
+            return dict(self._auth_env_cache)
+
+        auth_dir = self.auth_check_dir or _default_lark_auth_check_dir()
+        script = auth_dir / "scripts" / "check_auth.py"
+        if not script.exists():
+            raise LarkCommandError(
+                f"lark-auth-check skill not found at {script}",
+                code="lark_auth_check_missing",
+                recovery_actions=[
+                    "确认本机已安装 lark-auth-check skill 后重试。",
+                ],
+            )
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(auth_dir),
+        )
+        stdout, stderr = await process.communicate()
+        stdout_text = stdout.decode("utf-8", errors="replace")
+        stderr_text = stderr.decode("utf-8", errors="replace")
+        if process.returncode != 0:
+            raise LarkCommandError(
+                "lark-auth-check failed: "
+                f"{_sanitize_auth_text(stderr_text or stdout_text)}",
+                code="lark_auth_check_failed",
+                recovery_actions=[
+                    "按 lark-auth-check 输出完成飞书认证后，回到收件箱点击“重新采集”。",
+                ],
+            )
+
+        auth_result = _parse_lark_auth_check_output(stdout_text)
+        status = auth_result.get("AUTH_STATUS")
+        if status == "SUCCESS":
+            env_file = auth_result.get("ENV_FILE", "")
+            if not env_file:
+                raise LarkCommandError(
+                    "lark-auth-check did not return ENV_FILE",
+                    code="lark_auth_env_missing",
+                )
+            auth_env = _parse_lark_auth_env_file(Path(env_file))
+            if not auth_env:
+                raise LarkCommandError(
+                    "lark-auth-check ENV_FILE is empty",
+                    code="lark_auth_env_empty",
+                )
+            self._auth_env_cache = dict(auth_env)
+            self._auth_checked_at = now
+            return auth_env
+
+        if status == "NEED_AUTH":
+            auth_link = auth_result.get("AUTH_LINK", "")
+            raise LarkCommandError(
+                "lark-auth-check requires user authorization"
+                + (f": {auth_link}" if auth_link else ""),
+                code="need_user_authorization",
+                recovery_actions=[
+                    "打开 lark-auth-check 返回的授权链接完成认证。",
+                    "认证成功后回到收件箱点击“重新采集”。",
+                ],
+            )
+
+        message = (
+            auth_result.get("ERROR_MESSAGE") or stdout_text or stderr_text
+        )
+        raise LarkCommandError(
+            f"lark-auth-check returned {status or 'unknown'}: "
+            f"{_sanitize_auth_text(message)}",
+            code="lark_auth_check_unknown",
+            recovery_actions=[
+                "按 lark-auth-check 输出完成飞书认证后，回到收件箱点击“重新采集”。",
+            ],
         )
 
 
@@ -465,6 +568,7 @@ class LarkCollector:
         self.runner = runner or LarkCommandRunner()
         self.auth_env_collector = auth_env_collector or LarkAuthEnvCollector()
         self.last_errors: dict[str, str] = {}
+        self.last_diagnostics: list[WorkbenchCollectionDiagnostic] = []
         self.last_error_details: dict[str, WorkbenchCollectionIssue] = {}
 
     async def collect(
@@ -476,8 +580,14 @@ class LarkCollector:
         chat_keywords: list[str] | None = None,
     ) -> list[WorkbenchRawRecord]:
         self.last_errors = {}
+        self.last_diagnostics = []
         self.last_error_details = {}
         if not config.enabled:
+            for source in ("calendar", "tasks", "chat"):
+                self._mark_skipped(
+                    source,
+                    message="Lark integration disabled",
+                )
             return []
 
         enabled_sources = set(sources or ("calendar", "tasks", "chat"))
@@ -497,6 +607,11 @@ class LarkCollector:
                 for source, issue in fallback_issues.items():
                     self.last_errors[source] = issue.message
                     self.last_error_details[source] = issue
+                self._record_fallback_diagnostics(
+                    requested_sources,
+                    fallback_records,
+                    fallback_issues,
+                )
                 return fallback_records
             self._record_preflight_issue(preflight_issue, requested_sources)
             return []
@@ -509,10 +624,14 @@ class LarkCollector:
                     self._collect_calendar(date),
                 ),
             )
+        else:
+            self._mark_skipped("calendar")
         if config.collect_tasks and "tasks" in enabled_sources:
             records.extend(
                 await self._safe_collect("tasks", self._collect_tasks(date)),
             )
+        else:
+            self._mark_skipped("tasks")
         if config.collect_chat and "chat" in enabled_sources:
             records.extend(
                 await self._safe_collect(
@@ -523,6 +642,8 @@ class LarkCollector:
                     ),
                 ),
             )
+        else:
+            self._mark_skipped("chat")
         records.extend(
             await self._retry_failed_sources_with_auth_env(
                 date=date,
@@ -531,6 +652,15 @@ class LarkCollector:
             ),
         )
         return _dedupe_records(records)
+
+    def _mark_skipped(self, source: str, *, message: str = "") -> None:
+        self.last_diagnostics.append(
+            WorkbenchCollectionDiagnostic(
+                source=source,
+                status="skipped",
+                message=message,
+            ),
+        )
 
     def _record_preflight_issue(
         self,
@@ -541,6 +671,41 @@ class LarkCollector:
             issue = preflight_issue.model_copy(update={"source": source})
             self.last_errors[source] = issue.message
             self.last_error_details[source] = issue
+            self._record_issue_diagnostic(source, issue)
+
+    def _record_fallback_diagnostics(
+        self,
+        sources: list[str],
+        records: list[WorkbenchRawRecord],
+        issues: dict[str, WorkbenchCollectionIssue],
+    ) -> None:
+        counts = _record_counts_by_lark_source(records)
+        for source in sources:
+            issue = issues.get(source)
+            if issue is not None:
+                self._record_issue_diagnostic(
+                    source,
+                    issue,
+                    records=counts.get(source, 0),
+                )
+                continue
+            count = counts.get(source, 0)
+            self.last_diagnostics.append(
+                WorkbenchCollectionDiagnostic(
+                    source=source,
+                    status="ok" if count else "empty",
+                    records=count,
+                    message="" if count else "No records returned",
+                ),
+            )
+
+    def _clear_diagnostics_for_sources(self, sources: list[str]) -> None:
+        source_set = set(sources)
+        self.last_diagnostics = [
+            diagnostic
+            for diagnostic in self.last_diagnostics
+            if diagnostic.source not in source_set
+        ]
 
     async def _retry_failed_sources_with_auth_env(
         self,
@@ -574,6 +739,12 @@ class LarkCollector:
                 continue
             self.last_errors[source] = issue.message
             self.last_error_details[source] = issue
+        self._clear_diagnostics_for_sources(failed_sources)
+        self._record_fallback_diagnostics(
+            failed_sources,
+            fallback_records,
+            fallback_issues,
+        )
         return fallback_records
 
     async def _preflight_context(self) -> WorkbenchCollectionIssue | None:
@@ -593,10 +764,29 @@ class LarkCollector:
         awaitable,
     ) -> list[WorkbenchRawRecord]:
         try:
-            return await awaitable
+            records = await awaitable
+            issue = self.last_error_details.get(source)
+            if issue is not None:
+                self._record_issue_diagnostic(
+                    source,
+                    issue,
+                    records=len(records),
+                )
+            else:
+                self.last_diagnostics.append(
+                    WorkbenchCollectionDiagnostic(
+                        source=source,
+                        status="ok" if records else "empty",
+                        records=len(records),
+                        message="" if records else "No records returned",
+                    ),
+                )
+            return records
         except LarkCommandError as exc:
             self.last_errors[source] = exc.message
-            self.last_error_details[source] = exc.to_issue(source)
+            issue = exc.to_issue(source)
+            self.last_error_details[source] = issue
+            self._record_issue_diagnostic(source, issue)
             return []
         except (
             Exception
@@ -604,10 +794,27 @@ class LarkCollector:
             issue = _generic_issue(source, exc)
             self.last_errors[source] = issue.message
             self.last_error_details[source] = issue
+            self._record_issue_diagnostic(source, issue)
             return []
 
+    def _record_issue_diagnostic(
+        self,
+        source: str,
+        issue: WorkbenchCollectionIssue,
+        *,
+        records: int = 0,
+    ) -> None:
+        self.last_diagnostics.append(
+            WorkbenchCollectionDiagnostic(
+                source=source,
+                status="error",
+                records=records,
+                message=issue.message,
+            ),
+        )
+
     async def _collect_calendar(self, date: str) -> list[WorkbenchRawRecord]:
-        start, end = _day_window(date, days=7)
+        start, end = _day_window(date, days=1)
         payload = await self.runner.run_json(
             [
                 "lark-cli",
@@ -895,6 +1102,20 @@ def _requested_lark_sources(
     return requested
 
 
+def _record_counts_by_lark_source(
+    records: Iterable[WorkbenchRawRecord],
+) -> dict[str, int]:
+    counts = {"calendar": 0, "tasks": 0, "chat": 0}
+    for record in records:
+        if record.source_type == "lark_calendar":
+            counts["calendar"] += 1
+        elif record.source_type == "lark_task":
+            counts["tasks"] += 1
+        elif record.source_type == "lark_message":
+            counts["chat"] += 1
+    return counts
+
+
 def _is_fatal_lark_error(issue: WorkbenchCollectionIssue) -> bool:
     text = f"{issue.code or ''} {issue.message}".lower()
     return (
@@ -983,6 +1204,62 @@ def _recovery_actions(message: str, hint: str, payload: Any) -> list[str]:
     if not actions:
         actions.append("检查 lark-cli 输出和网络连接后，回到收件箱点击“重新采集”。")
     return list(dict.fromkeys(actions))
+
+
+def _default_lark_auth_check_dir() -> Path:
+    return Path.home() / ".agents" / "skills" / "lark-auth-check"
+
+
+def _parse_lark_auth_check_output(text: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
+_BASH_EXPORT_RE = re.compile(r"^export\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+_POWERSHELL_ENV_RE = re.compile(
+    r"^\$env:([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$",
+)
+
+
+def _parse_lark_auth_env_file(path: Path) -> dict[str, str]:
+    env: dict[str, str] = {}
+    text = path.read_text(encoding="utf-8")
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = _BASH_EXPORT_RE.match(line) or _POWERSHELL_ENV_RE.match(line)
+        if not match:
+            continue
+        key, raw_value = match.groups()
+        env[key] = _unquote_env_value(raw_value.strip())
+    return env
+
+
+def _unquote_env_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _sanitize_auth_text(text: str) -> str:
+    sanitized = re.sub(
+        r"(LARKSUITE_CLI_[A-Z_]*TOKEN=)[^\s]+",
+        r"\1***",
+        text,
+    )
+    sanitized = re.sub(
+        r"(\$env:LARKSUITE_CLI_[A-Z_]*TOKEN\s*=\s*)[^\r\n]+",
+        r"\1***",
+        sanitized,
+    )
+    return sanitized.strip()
 
 
 def _day_window(date: str, *, days: int) -> tuple[str, str]:

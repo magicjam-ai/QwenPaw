@@ -53,14 +53,28 @@ class WorkbenchStore:
         )
         return self.data_root / "issues" / f"{safe_id}.json"
 
+    def daily_summary_dir(self) -> Path:
+        return self.data_root / "summaries" / "daily"
+
+    def active_issue_dir(self) -> Path:
+        return self.data_root / "issues" / "active"
+
+    def meeting_dir(self) -> Path:
+        return self.data_root / "meetings"
+
+    def people_dir(self) -> Path:
+        return self.data_root / "people"
+
     def ensure_directories(self) -> None:
         for rel_path in (
             "cache/raw",
             "summaries",
+            "summaries/daily",
             "people",
             "meetings",
             "comms",
             "issues",
+            "issues/active",
         ):
             (self.data_root / rel_path).mkdir(parents=True, exist_ok=True)
 
@@ -162,3 +176,89 @@ class WorkbenchStore:
         async with self._lock:
             self.ensure_directories()
             self._write_json(self.issue_path(insight_id), payload)
+
+    async def export_sot(self, radar: DailyRadar) -> None:
+        async with self._lock:
+            self.ensure_directories()
+            self._write_daily_summary(radar)
+            self._write_active_issues(radar)
+            self._write_meetings(radar)
+            self._write_people(radar)
+
+    def _safe_slug(self, value: str) -> str:
+        slug = "".join(
+            char if char.isalnum() or char in ("-", "_") else "-"
+            for char in value.strip()
+        ).strip("-")
+        return slug[:80] or "untitled"
+
+    def _write_markdown(self, path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+        tmp_path.write_text(content, encoding="utf-8", newline="\n")
+        tmp_path.replace(path)
+
+    def _write_daily_summary(self, radar: DailyRadar) -> None:
+        lines = [
+            "---",
+            f"date: {radar.date}",
+            "type: daily-radar",
+            "---",
+            "",
+            f"# Daily Radar {radar.date}",
+            "",
+            "## Coverage",
+            "",
+            f"- Tasks: {radar.coverage.tasks}",
+            f"- Meetings: {radar.coverage.calendar_events}",
+            f"- Chat messages: {radar.coverage.chat_messages}",
+            f"- Sources: {', '.join(radar.coverage.sources)}",
+            "",
+            "## Highlights",
+            "",
+        ]
+        lines.extend(
+            f"- [{item.priority}] {item.title}" for item in radar.highlights
+        )
+        lines.extend(["", "## Risks", ""])
+        lines.extend(
+            f"- [{item.priority}] {item.title}"
+            for item in radar.sections.risks
+        )
+        lines.extend(["", "## Questions", ""])
+        lines.extend(
+            f"- [{item.priority}] {item.title}"
+            for item in radar.sections.questions
+        )
+        self._write_markdown(
+            self.daily_summary_dir() / f"{radar.date}.md",
+            "\n".join(lines).rstrip() + "\n",
+        )
+
+    def _write_active_issues(self, radar: DailyRadar) -> None:
+        for insight in (*radar.sections.risks, *radar.sections.questions):
+            if insight.status in {"ignored", "converted"}:
+                continue
+            payload = {
+                "date": radar.date,
+                "insight": _dump_model(insight),
+            }
+            self._write_json(
+                self.active_issue_dir()
+                / f"{self._safe_slug(insight.id)}.json",
+                payload,
+            )
+
+    def _write_meetings(self, radar: DailyRadar) -> None:
+        for insight in radar.sections.key_meetings:
+            self._write_json(
+                self.meeting_dir() / f"{self._safe_slug(insight.id)}.json",
+                {"date": radar.date, "insight": _dump_model(insight)},
+            )
+
+    def _write_people(self, radar: DailyRadar) -> None:
+        for insight in radar.sections.key_people:
+            self._write_json(
+                self.people_dir() / f"{self._safe_slug(insight.title)}.json",
+                {"date": radar.date, "insight": _dump_model(insight)},
+            )

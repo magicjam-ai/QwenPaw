@@ -45,6 +45,14 @@ class WorkbenchLarkIntegrationConfig(BaseModel):
     )
 
 
+class WorkbenchDailyRadarScheduleConfig(BaseModel):
+    enabled: bool = True
+    cron: str = "30 8 * * mon-fri"
+    timezone: str = "Asia/Shanghai"
+    output_to_inbox: bool = True
+    job_id: str = "workbench-daily-radar"
+
+
 class WorkbenchIntegrationsConfig(BaseModel):
     lark: WorkbenchLarkIntegrationConfig = Field(
         default_factory=WorkbenchLarkIntegrationConfig,
@@ -55,6 +63,9 @@ class WorkbenchFeaturesConfig(BaseModel):
     daily_radar: str = "enabled"
     meeting_collection: str = "auto"
     action_hub: str = "enabled"
+    daily_radar_schedule: WorkbenchDailyRadarScheduleConfig = Field(
+        default_factory=WorkbenchDailyRadarScheduleConfig,
+    )
 
 
 class WorkbenchConfig(BaseModel):
@@ -126,6 +137,13 @@ class WorkbenchRawRecord(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkbenchCollectionDiagnostic(BaseModel):
+    source: str
+    status: Literal["ok", "empty", "skipped", "error"] = "ok"
+    records: int = 0
+    message: str = ""
+
+
 class WorkbenchCollectRequest(BaseModel):
     date: str | None = None
     mode: WorkbenchCollectMode = "manual"
@@ -154,9 +172,22 @@ class WorkbenchCollectResponse(BaseModel):
     records_added: int
     coverage: DailyRadarCoverage
     collection_errors: dict[str, str] = Field(default_factory=dict)
-    collection_diagnostics: dict[str, WorkbenchCollectionIssue] = Field(
+    collection_diagnostics: list[WorkbenchCollectionDiagnostic] = Field(
+        default_factory=list,
+    )
+    collection_issues: dict[str, WorkbenchCollectionIssue] = Field(
         default_factory=dict,
     )
+
+
+class WorkbenchConfigUpdateRequest(BaseModel):
+    daily_radar_schedule: WorkbenchDailyRadarScheduleConfig | None = None
+
+
+class WorkbenchDailyRadarScheduleResponse(BaseModel):
+    schedule: WorkbenchDailyRadarScheduleConfig
+    created: bool = False
+    updated: bool = False
 
 
 class WorkbenchAnalyzeResponse(BaseModel):

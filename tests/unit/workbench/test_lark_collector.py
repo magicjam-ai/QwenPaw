@@ -15,6 +15,8 @@ from qwenpaw.workbench.lark_collector import (
     LarkCommandRunner,
     _load_lark_auth_token,
     _message_should_collect,
+    _parse_lark_auth_check_output,
+    _parse_lark_auth_env_file,
 )
 from qwenpaw.workbench.models import (
     WorkbenchCollectionIssue,
@@ -263,6 +265,101 @@ async def test_lark_collector_respects_disabled_sources():
     assert len(runner.argvs) == 2
     assert runner.argvs[0] == ["lark-cli", "config", "show"]
     assert runner.argvs[1][1:3] == ["task", "+get-my-tasks"]
+
+
+def test_parse_lark_auth_check_output():
+    result = _parse_lark_auth_check_output(
+        "\n".join(
+            [
+                "AUTH_STATUS: SUCCESS",
+                "APP_ID: cli_test",
+                r"ENV_FILE: C:\Users\me\.magic_skills\.feishu_auth_env",
+            ],
+        ),
+    )
+
+    assert result == {
+        "AUTH_STATUS": "SUCCESS",
+        "APP_ID": "cli_test",
+        "ENV_FILE": r"C:\Users\me\.magic_skills\.feishu_auth_env",
+    }
+
+
+def test_parse_lark_auth_env_file_supports_bash_and_powershell(tmp_path):
+    env_file = tmp_path / ".feishu_auth_env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "export LARKSUITE_CLI_USER_ACCESS_TOKEN=token-from-bash",
+                "export LARKSUITE_CLI_APP_ID=cli_bash",
+                '$env:LARKSUITE_CLI_TENANT_ACCESS_TOKEN = "token-from-ps"',
+            ],
+        ),
+        encoding="utf-8",
+    )
+
+    assert _parse_lark_auth_env_file(env_file) == {
+        "LARKSUITE_CLI_USER_ACCESS_TOKEN": "token-from-bash",
+        "LARKSUITE_CLI_APP_ID": "cli_bash",
+        "LARKSUITE_CLI_TENANT_ACCESS_TOKEN": "token-from-ps",
+    }
+
+
+@pytest.mark.asyncio
+async def test_lark_command_runner_loads_lark_auth_env(monkeypatch, tmp_path):
+    auth_dir = tmp_path / "lark-auth-check"
+    script = auth_dir / "scripts" / "check_auth.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("# test fixture\n", encoding="utf-8")
+    env_file = tmp_path / ".feishu_auth_env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "export LARKSUITE_CLI_USER_ACCESS_TOKEN=token",
+                "export LARKSUITE_CLI_APP_ID=cli_test",
+            ],
+        ),
+        encoding="utf-8",
+    )
+
+    calls: list[dict] = []
+
+    class FakeProcess:
+        def __init__(self, returncode: int, stdout: str, stderr: str = ""):
+            self.returncode = returncode
+            self._stdout = stdout.encode("utf-8")
+            self._stderr = stderr.encode("utf-8")
+
+        async def communicate(self):
+            return self._stdout, self._stderr
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        if str(script) in args:
+            return FakeProcess(
+                0,
+                f"AUTH_STATUS: SUCCESS\nENV_FILE: {env_file}\n",
+            )
+        return FakeProcess(0, '{"ok": true}')
+
+    monkeypatch.setattr(
+        "qwenpaw.workbench.lark_collector.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "qwenpaw.workbench.lark_collector.shutil.which",
+        lambda executable: executable,
+    )
+    runner = LarkCommandRunner(auth_check_dir=auth_dir)
+
+    assert await runner.run_json(["lark-cli", "calendar", "+agenda"]) == {
+        "ok": True,
+    }
+
+    assert calls[0]["kwargs"]["cwd"] == str(auth_dir)
+    lark_call_env = calls[1]["kwargs"]["env"]
+    assert lark_call_env["LARKSUITE_CLI_USER_ACCESS_TOKEN"] == "token"
+    assert lark_call_env["LARKSUITE_CLI_APP_ID"] == "cli_test"
 
 
 @pytest.mark.asyncio
