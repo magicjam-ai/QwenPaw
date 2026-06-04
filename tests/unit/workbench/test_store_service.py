@@ -235,7 +235,10 @@ async def test_analyze_today_applies_prd_data_quality_rules(tmp_path):
                 "source_type": "lark_message",
                 "source_id": "ci-failed",
                 "title": "Pipeline Build Failed",
-                "summary": "Failed stage deploy blocked release owner Alice(ou_hidden)",
+                "summary": (
+                    "Failed stage deploy blocked release owner "
+                    "Alice(ou_hidden)"
+                ),
                 "people": ["Alice"],
                 "created_at": "2026-06-02T09:00:00+08:00",
             },
@@ -245,10 +248,14 @@ async def test_analyze_today_applies_prd_data_quality_rules(tmp_path):
 
     radar = await service.analyze_today(date="2026-06-02")
 
-    assert [item.sources[0].source_id for item in radar.sections.key_tasks] == [
+    assert [
+        item.sources[0].source_id for item in radar.sections.key_tasks
+    ] == [
         "task-current",
     ]
-    assert [item.sources[0].source_id for item in radar.sections.key_meetings] == [
+    assert [
+        item.sources[0].source_id for item in radar.sections.key_meetings
+    ] == [
         "meeting-today",
     ]
     assert "ci-success" not in {
@@ -269,7 +276,10 @@ async def test_analyze_today_applies_prd_data_quality_rules(tmp_path):
         for item in radar.sections.key_people
         for person in item.related_people
     )
-    assert {item.title for item in radar.sections.key_people} >= {"Alice", "Bob"}
+    assert {item.title for item in radar.sections.key_people} >= {
+        "Alice",
+        "Bob",
+    }
 
 
 @pytest.mark.asyncio
@@ -331,7 +341,9 @@ async def test_analyze_today_exports_smart_workbench_sot(tmp_path):
 
     radar = await service.analyze_today(date="2026-06-02")
 
-    assert (tmp_path / ".workbench" / "summaries" / "daily" / "2026-06-02.md").is_file()
+    assert (
+        tmp_path / ".workbench" / "summaries" / "daily" / "2026-06-02.md"
+    ).is_file()
     assert list((tmp_path / ".workbench" / "issues" / "active").glob("*.json"))
     assert (
         tmp_path

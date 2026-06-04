@@ -217,11 +217,19 @@ class WorkbenchStore:
             "## Highlights",
             "",
         ]
-        lines.extend(f"- [{item.priority}] {item.title}" for item in radar.highlights)
+        lines.extend(
+            f"- [{item.priority}] {item.title}" for item in radar.highlights
+        )
         lines.extend(["", "## Risks", ""])
-        lines.extend(f"- [{item.priority}] {item.title}" for item in radar.sections.risks)
+        lines.extend(
+            f"- [{item.priority}] {item.title}"
+            for item in radar.sections.risks
+        )
         lines.extend(["", "## Questions", ""])
-        lines.extend(f"- [{item.priority}] {item.title}" for item in radar.sections.questions)
+        lines.extend(
+            f"- [{item.priority}] {item.title}"
+            for item in radar.sections.questions
+        )
         self._write_markdown(
             self.daily_summary_dir() / f"{radar.date}.md",
             "\n".join(lines).rstrip() + "\n",
@@ -236,7 +244,8 @@ class WorkbenchStore:
                 "insight": _dump_model(insight),
             }
             self._write_json(
-                self.active_issue_dir() / f"{self._safe_slug(insight.id)}.json",
+                self.active_issue_dir()
+                / f"{self._safe_slug(insight.id)}.json",
                 payload,
             )
 

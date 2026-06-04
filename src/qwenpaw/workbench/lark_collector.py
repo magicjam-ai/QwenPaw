@@ -219,7 +219,9 @@ class LarkCommandRunner:
                 ],
             )
 
-        message = auth_result.get("ERROR_MESSAGE") or stdout_text or stderr_text
+        message = (
+            auth_result.get("ERROR_MESSAGE") or stdout_text or stderr_text
+        )
         raise LarkCommandError(
             f"lark-auth-check returned {status or 'unknown'}: "
             f"{_sanitize_auth_text(message)}",
@@ -681,7 +683,9 @@ class LarkCollector:
         for source in sources:
             issue = issues.get(source)
             if issue is not None:
-                self._record_issue_diagnostic(source, issue, records=counts.get(source, 0))
+                self._record_issue_diagnostic(
+                    source, issue, records=counts.get(source, 0)
+                )
                 continue
             count = counts.get(source, 0)
             self.last_diagnostics.append(
@@ -761,7 +765,9 @@ class LarkCollector:
             records = await awaitable
             issue = self.last_error_details.get(source)
             if issue is not None:
-                self._record_issue_diagnostic(source, issue, records=len(records))
+                self._record_issue_diagnostic(
+                    source, issue, records=len(records)
+                )
             else:
                 self.last_diagnostics.append(
                     WorkbenchCollectionDiagnostic(

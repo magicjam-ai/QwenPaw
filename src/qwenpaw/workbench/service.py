@@ -113,7 +113,9 @@ def _target_day_bounds(date: str) -> tuple[datetime, datetime]:
 
 def _is_raw_identifier(value: str) -> bool:
     lowered = value.lower()
-    return lowered.startswith(("ou_", "on_", "oc_", "om_", "cli_", "open_", "user_", "union_"))
+    return lowered.startswith(
+        ("ou_", "on_", "oc_", "om_", "cli_", "open_", "user_", "union_")
+    )
 
 
 def _sanitize_visible_text(value: str) -> str:
@@ -181,7 +183,12 @@ def _is_broadcast_task(record: WorkbenchRawRecord) -> bool:
 
 def _is_broadcast_text(text: str) -> bool:
     lowered = text.lower()
-    return "@_all" in lowered or "@所有人" in text or "@all" in lowered or "所有人" in text
+    return (
+        "@_all" in lowered
+        or "@所有人" in text
+        or "@all" in lowered
+        or "所有人" in text
+    )
 
 
 def _is_stale_task(record: WorkbenchRawRecord, target_date: str) -> bool:
@@ -217,17 +224,23 @@ def _looks_like_ci_message(text: str) -> bool:
 
 def _is_success_ci_message(text: str) -> bool:
     lowered = text.lower()
-    return _looks_like_ci_message(text) and any(
-        marker in lowered for marker in ("build success", "[ok]", "success")
-    ) and not any(
-        marker in lowered for marker in ("failed", "failure", "blocked")
+    return (
+        _looks_like_ci_message(text)
+        and any(
+            marker in lowered
+            for marker in ("build success", "[ok]", "success")
+        )
+        and not any(
+            marker in lowered for marker in ("failed", "failure", "blocked")
+        )
     )
 
 
 def _is_failed_ci_message(text: str) -> bool:
     lowered = text.lower()
     return _looks_like_ci_message(text) and any(
-        marker in lowered for marker in ("failed", "failure", "failed stage", "blocked")
+        marker in lowered
+        for marker in ("failed", "failure", "failed stage", "blocked")
     )
 
 
@@ -260,7 +273,9 @@ class WorkbenchService:
         self.store = store
         self.lark_collector = lark_collector
         self.last_collection_errors: dict[str, str] = {}
-        self.last_collection_diagnostics: list[WorkbenchCollectionDiagnostic] = []
+        self.last_collection_diagnostics: list[
+            WorkbenchCollectionDiagnostic
+        ] = []
         self.last_collection_issues: dict[str, WorkbenchCollectionIssue] = {}
 
     def default_config(self) -> WorkbenchConfig:
@@ -310,7 +325,10 @@ class WorkbenchService:
                 "job_id": schedule.job_id or "workbench-daily-radar",
             },
         )
-        if next_schedule != schedule or config.features.daily_radar != "enabled":
+        if (
+            next_schedule != schedule
+            or config.features.daily_radar != "enabled"
+        ):
             updated = True
             await self.update_config(daily_radar_schedule=next_schedule)
         return next_schedule, created, updated
@@ -451,9 +469,13 @@ class WorkbenchService:
             if _is_question_record(record, date):
                 question_records.append(record)
             if record.source_type == "lark_task":
-                if not _is_stale_task(record, date) and not _is_broadcast_task(record):
+                if not _is_stale_task(record, date) and not _is_broadcast_task(
+                    record
+                ):
                     sections.key_tasks.append(
-                        self._record_insight(record, "task", due_at=record.due_at),
+                        self._record_insight(
+                            record, "task", due_at=record.due_at
+                        ),
                     )
             elif record.source_type == "lark_calendar":
                 if _is_today_meeting(record, date):

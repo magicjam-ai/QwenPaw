@@ -88,7 +88,7 @@ class FailingCollector:
                 source="calendar",
                 status="error",
                 records=0,
-                message="need_user_authorization: calendar:calendar.event:read",
+                message=auth_error,
             ),
         ]
         return []
@@ -181,7 +181,9 @@ def test_workbench_config_and_init_contract(
     assert config["features"]["daily_radar_schedule"]["cron"] == (
         "30 8 * * mon-fri"
     )
-    assert config["features"]["daily_radar_schedule"]["output_to_inbox"] is True
+    assert (
+        config["features"]["daily_radar_schedule"]["output_to_inbox"] is True
+    )
 
     init_resp = workbench_client.client.post("/api/workbench/init")
     assert init_resp.status_code == 200

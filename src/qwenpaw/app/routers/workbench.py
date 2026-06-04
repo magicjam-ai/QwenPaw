@@ -43,10 +43,12 @@ async def post_workbench_init() -> WorkbenchConfig:
     "/schedule/daily-radar/ensure",
     response_model=WorkbenchDailyRadarScheduleResponse,
 )
-async def post_workbench_daily_radar_schedule_ensure() -> WorkbenchDailyRadarScheduleResponse:
-    schedule, created, updated = (
-        await get_workbench_service().ensure_daily_radar_schedule()
-    )
+async def ensure_daily_radar() -> WorkbenchDailyRadarScheduleResponse:
+    (
+        schedule,
+        created,
+        updated,
+    ) = await get_workbench_service().ensure_daily_radar_schedule()
     return WorkbenchDailyRadarScheduleResponse(
         schedule=schedule,
         created=created,
@@ -58,7 +60,7 @@ async def post_workbench_daily_radar_schedule_ensure() -> WorkbenchDailyRadarSch
     "/schedule/daily-radar/disable",
     response_model=WorkbenchDailyRadarScheduleResponse,
 )
-async def post_workbench_daily_radar_schedule_disable() -> WorkbenchDailyRadarScheduleResponse:
+async def disable_daily_radar() -> WorkbenchDailyRadarScheduleResponse:
     schedule = await get_workbench_service().disable_daily_radar_schedule()
     return WorkbenchDailyRadarScheduleResponse(
         schedule=schedule,
