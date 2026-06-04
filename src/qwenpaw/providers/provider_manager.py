@@ -857,6 +857,86 @@ PROVIDER_OPENCODE = OpenAIProvider(
     freeze_url=False,
 )
 
+PROVIDER_MODELSIGHT = OpenAIProvider(
+    id="modelsight",
+    name="ModelSight",
+    base_url=os.environ.get("QWENPAW_MODELSIGHT_BASE_URL", ""),
+    api_key_prefix=os.environ.get("QWENPAW_MODELSIGHT_API_KEY_PREFIX", ""),
+    models=[],
+    freeze_url=False,
+    require_api_key=False,
+    support_model_discovery=True,
+    support_connection_check=True,
+    meta={
+        "source_type": "company_private",
+        "scope": "company",
+        "display_group": "company",
+        "description": (
+            "Company private OpenAI-compatible endpoint. Configure Base URL, "
+            "optional API key, discover or add models, then set a model active."
+        ),
+        "base_url_env": "QWENPAW_MODELSIGHT_BASE_URL",
+    },
+)
+
+PROVIDER_TRAE_CN = OpenAIProvider(
+    id="trae-cn",
+    name="Trae CN Enterprise",
+    base_url=os.environ.get("QWENPAW_TRAE_CN_BASE_URL", ""),
+    api_key_prefix=os.environ.get("QWENPAW_TRAE_CN_API_KEY_PREFIX", ""),
+    models=[],
+    freeze_url=False,
+    require_api_key=False,
+    support_model_discovery=True,
+    support_connection_check=True,
+    meta={
+        "source_type": "company_commercial",
+        "scope": "company",
+        "display_group": "company",
+        "description": (
+            "Trae CN enterprise model endpoint. It is treated as an "
+            "OpenAI-compatible service so configured models can be used by "
+            "chat and agents directly."
+        ),
+        "base_url_env": "QWENPAW_TRAE_CN_BASE_URL",
+    },
+)
+
+PROVIDER_CLI_PROXY = OpenAIProvider(
+    id="cli-proxy",
+    name="CLI Proxy API",
+    base_url=os.environ.get("QWENPAW_CLI_PROXY_BASE_URL", "http://127.0.0.1:3030/v1"),
+    api_key_prefix=os.environ.get("QWENPAW_CLI_PROXY_API_KEY_PREFIX", ""),
+    models=[],
+    freeze_url=False,
+    require_api_key=False,
+    support_model_discovery=True,
+    support_connection_check=True,
+    meta={
+        "source_type": "cli_proxy",
+        "scope": "advanced",
+        "display_group": "advanced",
+        "description": (
+            "OpenAI-compatible proxy for CLI tools such as Trae CLI, Claude "
+            "Code, Codex CLI, or router-for-me/CLIProxyAPI. Run the proxy, "
+            "configure its Base URL, discover or add models, then set one "
+            "active."
+        ),
+        "base_url_env": "QWENPAW_CLI_PROXY_BASE_URL",
+        "base_url_options": [
+            {
+                "label": "CLIProxyAPI default",
+                "value": "http://127.0.0.1:3030/v1",
+            },
+            {
+                "label": "Local OpenAI-compatible proxy",
+                "value": "http://127.0.0.1:11434/v1",
+            },
+        ],
+        "supported_clients": ["trae-cli", "claude-code", "codex-cli"],
+    },
+)
+
 PROVIDER_AZURE_OPENAI = OpenAIProvider(
     id="azure-openai",
     name="Azure OpenAI",
@@ -1070,6 +1150,9 @@ class ProviderManager:  # pylint: disable=too-many-public-methods
         self._add_builtin(PROVIDER_ALIYUN_CODINGPLAN_INTL)
         self._add_builtin(PROVIDER_ALIYUN_TOKENPLAN)
         self._add_builtin(PROVIDER_OPENCODE)
+        self._add_builtin(PROVIDER_MODELSIGHT)
+        self._add_builtin(PROVIDER_TRAE_CN)
+        self._add_builtin(PROVIDER_CLI_PROXY)
         self._add_builtin(PROVIDER_OPENAI)
         self._add_builtin(PROVIDER_AZURE_OPENAI)
         self._add_builtin(PROVIDER_ANTHROPIC)
