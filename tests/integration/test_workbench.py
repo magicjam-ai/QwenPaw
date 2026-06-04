@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from qwenpaw.app import inbox_store
+from qwenpaw.workbench.models import WorkbenchCollectionDiagnostic
 from qwenpaw.workbench import service as workbench_service_module
 from qwenpaw.workbench.service import WorkbenchService
 from qwenpaw.workbench.store import WorkbenchStore
@@ -20,6 +21,13 @@ from qwenpaw.workbench.store import WorkbenchStore
 
 class FakeCollector:
     last_errors: dict[str, str] = {}
+    last_diagnostics = [
+        WorkbenchCollectionDiagnostic(
+            source="tasks",
+            status="ok",
+            records=1,
+        ),
+    ]
 
     async def collect(
         self,
@@ -44,6 +52,7 @@ class FakeCollector:
 class FailingCollector:
     def __init__(self):
         self.last_errors: dict[str, str] = {}
+        self.last_diagnostics: list[WorkbenchCollectionDiagnostic] = []
 
     async def collect(
         self,
@@ -56,6 +65,14 @@ class FailingCollector:
         self.last_errors = {
             "calendar": "need_user_authorization: calendar:calendar.event:read",
         }
+        self.last_diagnostics = [
+            WorkbenchCollectionDiagnostic(
+                source="calendar",
+                status="error",
+                records=0,
+                message="need_user_authorization: calendar:calendar.event:read",
+            ),
+        ]
         return []
 
 
@@ -136,18 +153,59 @@ def test_workbench_config_and_init_contract(
     config = config_resp.json()
     assert config["workspace"]["storage_mode"] == "local"
     assert config["integrations"]["lark"]["collect_calendar"] is True
+    assert config["features"]["daily_radar_schedule"]["enabled"] is True
+    assert config["features"]["daily_radar_schedule"]["cron"] == (
+        "30 8 * * mon-fri"
+    )
+    assert config["features"]["daily_radar_schedule"]["output_to_inbox"] is True
 
     init_resp = workbench_client.client.post("/api/workbench/init")
     assert init_resp.status_code == 200
     for rel_path in (
         "cache/raw",
         "summaries",
+        "summaries/daily",
         "people",
         "meetings",
         "comms",
         "issues",
+        "issues/active",
     ):
         assert (_workbench_root(workbench_client.working_dir) / rel_path).is_dir()
+
+
+@pytest.mark.integration
+@pytest.mark.p1
+def test_workbench_daily_radar_schedule_contract(
+    workbench_client: WorkbenchClient,
+) -> None:
+    patch_resp = workbench_client.client.patch(
+        "/api/workbench/config",
+        json={"daily_radar_schedule": {"enabled": False}},
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["features"]["daily_radar"] == "disabled"
+    assert (
+        patch_resp.json()["features"]["daily_radar_schedule"]["enabled"]
+        is False
+    )
+
+    ensure_resp = workbench_client.client.post(
+        "/api/workbench/schedule/daily-radar/ensure",
+    )
+    assert ensure_resp.status_code == 200
+    ensure_payload = ensure_resp.json()
+    assert ensure_payload["updated"] is True
+    assert ensure_payload["schedule"]["enabled"] is True
+    assert ensure_payload["schedule"]["cron"] == "30 8 * * mon-fri"
+    assert ensure_payload["schedule"]["output_to_inbox"] is True
+
+    disable_resp = workbench_client.client.post(
+        "/api/workbench/schedule/daily-radar/disable",
+    )
+    assert disable_resp.status_code == 200
+    assert disable_resp.json()["updated"] is True
+    assert disable_resp.json()["schedule"]["enabled"] is False
 
 
 @pytest.mark.integration
@@ -242,7 +300,23 @@ def test_workbench_collect_analyze_and_actions_roundtrip(
 
     inbox_file = workbench_client.working_dir / "inbox_events.json"
     inbox_events = json.loads(inbox_file.read_text(encoding="utf-8"))
-    assert any(event["source_type"] == "workbench" for event in inbox_events)
+    workbench_events = [
+        event
+        for event in inbox_events
+        if event["source_type"] == "workbench"
+        and event["event_type"] == "daily_radar_analyzed"
+    ]
+    assert workbench_events
+    event = workbench_events[0]
+    assert event["severity"] == "warning"
+    assert event["payload"]["date"] == "2026-06-02"
+    assert event["payload"]["generated_at"] == radar["generated_at"]
+    assert event["payload"]["coverage"] == radar["coverage"]
+    assert event["payload"]["counts"] == {
+        "highlights": len(radar["highlights"]),
+        "risks": len(radar["sections"]["risks"]),
+        "questions": len(radar["sections"]["questions"]),
+    }
 
 
 @pytest.mark.integration
@@ -276,6 +350,9 @@ def test_workbench_live_collect_contract(
     payload = collect_resp.json()
     assert payload["records_added"] == 1
     assert payload["coverage"]["tasks"] == 1
+    assert payload["collection_diagnostics"] == [
+        {"source": "tasks", "status": "ok", "records": 1, "message": ""},
+    ]
 
     radar_resp = workbench_client.client.post(
         "/api/workbench/analyze",
@@ -317,3 +394,11 @@ def test_workbench_live_collect_returns_collection_errors(
     assert payload["collection_errors"] == {
         "calendar": "need_user_authorization: calendar:calendar.event:read",
     }
+    assert payload["collection_diagnostics"] == [
+        {
+            "source": "calendar",
+            "status": "error",
+            "records": 0,
+            "message": "need_user_authorization: calendar:calendar.event:read",
+        },
+    ]
