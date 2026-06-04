@@ -114,7 +114,7 @@ def _target_day_bounds(date: str) -> tuple[datetime, datetime]:
 def _is_raw_identifier(value: str) -> bool:
     lowered = value.lower()
     return lowered.startswith(
-        ("ou_", "on_", "oc_", "om_", "cli_", "open_", "user_", "union_")
+        ("ou_", "on_", "oc_", "om_", "cli_", "open_", "user_", "union_"),
     )
 
 
@@ -470,11 +470,13 @@ class WorkbenchService:
                 question_records.append(record)
             if record.source_type == "lark_task":
                 if not _is_stale_task(record, date) and not _is_broadcast_task(
-                    record
+                    record,
                 ):
                     sections.key_tasks.append(
                         self._record_insight(
-                            record, "task", due_at=record.due_at
+                            record,
+                            "task",
+                            due_at=record.due_at,
                         ),
                     )
             elif record.source_type == "lark_calendar":

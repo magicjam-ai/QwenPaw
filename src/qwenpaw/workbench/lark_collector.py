@@ -684,7 +684,9 @@ class LarkCollector:
             issue = issues.get(source)
             if issue is not None:
                 self._record_issue_diagnostic(
-                    source, issue, records=counts.get(source, 0)
+                    source,
+                    issue,
+                    records=counts.get(source, 0),
                 )
                 continue
             count = counts.get(source, 0)
@@ -766,7 +768,9 @@ class LarkCollector:
             issue = self.last_error_details.get(source)
             if issue is not None:
                 self._record_issue_diagnostic(
-                    source, issue, records=len(records)
+                    source,
+                    issue,
+                    records=len(records),
                 )
             else:
                 self.last_diagnostics.append(
