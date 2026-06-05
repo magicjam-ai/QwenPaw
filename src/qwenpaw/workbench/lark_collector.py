@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time as time_module
 from collections.abc import Iterable
@@ -168,8 +169,9 @@ class LarkCommandRunner:
                 ],
             )
 
+        python_argv = _auth_check_python_argv()
         process = await asyncio.create_subprocess_exec(
-            sys.executable,
+            *python_argv,
             str(script),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -942,6 +944,50 @@ def _try_parse_json_output(text: str) -> Any | None:
     return None
 
 
+def _auth_check_python_argv() -> list[str]:
+    """Return a Python command that can execute lark-auth-check scripts.
+
+    In packaged desktop builds ``sys.executable`` is the PyInstaller backend
+    executable, not a normal Python interpreter.  Prefer an explicit override,
+    then the current interpreter only when it is not frozen, and finally common
+    platform Python launchers.
+    """
+
+    override = os.environ.get("LARK_AUTH_CHECK_PYTHON") or os.environ.get(
+        "QWENPAW_EXTERNAL_PYTHON",
+    )
+    if override:
+        return [override]
+
+    if not getattr(sys, "frozen", False):
+        return [sys.executable]
+
+    candidates: list[list[str]] = []
+    if sys.platform.startswith("win"):
+        candidates.append(["py", "-3"])
+    candidates.extend([["python"], ["python3"]])
+
+    for candidate in candidates:
+        executable = shutil.which(candidate[0])
+        if not executable:
+            continue
+        argv = [executable, *candidate[1:]]
+        try:
+            completed = subprocess.run(
+                [*argv, "--version"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if completed.returncode == 0:
+            return argv
+
+    return [sys.executable]
+
+
 def _command_error_from_payload(
     argv: list[str],
     returncode: int,
@@ -1589,11 +1635,15 @@ def _timestamp_to_iso(value: str) -> str | None:
 def _datetime_from_lark_time(value: str) -> datetime | None:
     if not value:
         return None
-    iso_value = _timestamp_to_iso(value) or value
+    iso_value = (_timestamp_to_iso(value) or value).replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(iso_value)
+        parsed = datetime.fromisoformat(iso_value)
     except ValueError:
         return None
+    local_tz = datetime.now().astimezone().tzinfo
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=local_tz)
+    return parsed.astimezone(local_tz)
 
 
 def _dedupe_records(

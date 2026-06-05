@@ -9,6 +9,17 @@ from qwenpaw.providers.provider_manager import (
     PROVIDER_TRAE_CN,
     ProviderManager,
 )
+from qwenpaw.app.routers import providers as providers_router
+from qwenpaw.app.routers.providers import (
+    CliCommandStatus,
+    CliProxyStatus,
+    ConfigureTraeCliRequest,
+    TraeCliStatusResponse,
+    configure_trae_cli_provider,
+    configure_provider,
+    list_all_providers,
+    ProviderConfigRequest,
+)
 
 
 def test_enterprise_model_center_providers_are_openai_compatible() -> None:
@@ -74,3 +85,80 @@ async def test_can_configure_add_model_and_activate_enterprise_provider(
     assert provider.base_url == "http://modelsight.internal/v1"
     assert provider.has_model("modelsight-chat")
     assert reloaded.get_active_model().provider_id == "modelsight"
+
+
+async def test_provider_config_api_can_update_display_name(
+    isolated_secret_dir,
+) -> None:
+    manager = ProviderManager()
+
+    updated = await configure_provider(
+        manager=manager,
+        provider_id="cli-proxy",
+        body=ProviderConfigRequest(
+            name="9Router",
+            base_url="http://127.0.0.1:20128/v1",
+        ),
+    )
+
+    assert updated.name == "9Router"
+    assert manager.get_provider("cli-proxy").name == "9Router"
+
+
+async def test_list_providers_annotates_trae_cli_status(
+    isolated_secret_dir,
+    monkeypatch,
+) -> None:
+    async def fake_status():
+        return TraeCliStatusResponse(
+            cli=CliCommandStatus(
+                installed=True,
+                command="traecli",
+                path="/usr/bin/traecli",
+                version="traecli 1.0.0",
+            ),
+            proxies=[
+                CliProxyStatus(
+                    base_url="http://127.0.0.1:20128/v1",
+                    healthy=True,
+                ),
+            ],
+            selected_base_url="http://127.0.0.1:20128/v1",
+        )
+
+    monkeypatch.setattr(providers_router, "_trae_cli_status", fake_status)
+
+    providers = await list_all_providers(manager=ProviderManager())
+    trae = next(provider for provider in providers if provider.id == "trae-cn")
+
+    assert trae.meta["cli_status"]["cli"]["installed"] is True
+    assert trae.meta["detected_base_url"] == "http://127.0.0.1:20128/v1"
+
+
+async def test_configure_trae_cli_provider_registers_openai_proxy(
+    isolated_secret_dir,
+    monkeypatch,
+) -> None:
+    async def fake_status():
+        return TraeCliStatusResponse(
+            cli=CliCommandStatus(
+                installed=True,
+                command="traecli",
+                path="/usr/bin/traecli",
+            ),
+            proxies=[],
+            selected_base_url="http://127.0.0.1:20128/v1",
+        )
+
+    monkeypatch.setattr(providers_router, "_trae_cli_status", fake_status)
+    manager = ProviderManager()
+
+    provider = await configure_trae_cli_provider(
+        manager=manager,
+        body=ConfigureTraeCliRequest(model_id="trae-enterprise"),
+    )
+
+    assert provider.id == "trae-cn"
+    assert provider.name == "Trae 企业版"
+    assert provider.base_url == "http://127.0.0.1:20128/v1"
+    assert provider.extra_models[0].id == "trae-enterprise"

@@ -13,6 +13,7 @@ from qwenpaw.workbench.lark_collector import (
     LarkCollector,
     LarkCommandError,
     LarkCommandRunner,
+    _auth_check_python_argv,
     _load_lark_auth_token,
     _message_should_collect,
     _parse_lark_auth_check_output,
@@ -305,6 +306,22 @@ def test_parse_lark_auth_env_file_supports_bash_and_powershell(tmp_path):
     }
 
 
+def test_message_should_collect_accepts_naive_message_time():
+    assert _message_should_collect(
+        {"message_id": "msg-1", "text": "blocked", "create_time": "2026-06-05 10:30:00"},
+        "2026-06-05T00:00:00+08:00",
+        "2026-06-06T00:00:00+08:00",
+    )
+
+
+def test_message_should_collect_accepts_utc_z_message_time():
+    assert _message_should_collect(
+        {"message_id": "msg-1", "text": "blocked", "create_time": "2026-06-05T02:30:00Z"},
+        "2026-06-05T00:00:00+08:00",
+        "2026-06-06T00:00:00+08:00",
+    )
+
+
 @pytest.mark.asyncio
 async def test_lark_command_runner_loads_lark_auth_env(monkeypatch, tmp_path):
     auth_dir = tmp_path / "lark-auth-check"
@@ -360,6 +377,36 @@ async def test_lark_command_runner_loads_lark_auth_env(monkeypatch, tmp_path):
     lark_call_env = calls[1]["kwargs"]["env"]
     assert lark_call_env["LARKSUITE_CLI_USER_ACCESS_TOKEN"] == "token"
     assert lark_call_env["LARKSUITE_CLI_APP_ID"] == "cli_test"
+
+
+def test_auth_check_python_argv_uses_override(monkeypatch):
+    monkeypatch.setenv("LARK_AUTH_CHECK_PYTHON", "/opt/python/bin/python")
+
+    assert _auth_check_python_argv() == ["/opt/python/bin/python"]
+
+
+def test_auth_check_python_argv_frozen_finds_external_python(monkeypatch):
+    calls: list[list[str]] = []
+
+    class FakeCompleted:
+        returncode = 0
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return FakeCompleted()
+
+    monkeypatch.delenv("LARK_AUTH_CHECK_PYTHON", raising=False)
+    monkeypatch.delenv("QWENPAW_EXTERNAL_PYTHON", raising=False)
+    monkeypatch.setattr("qwenpaw.workbench.lark_collector.sys.frozen", True, raising=False)
+    monkeypatch.setattr("qwenpaw.workbench.lark_collector.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("qwenpaw.workbench.lark_collector.subprocess.run", fake_run)
+
+    argv = _auth_check_python_argv()
+
+    assert argv[0] in {"/usr/bin/py", "/usr/bin/python"}
+    if argv[0].endswith("/py"):
+        assert argv[1] == "-3"
+    assert calls[0][-1] == "--version"
 
 
 @pytest.mark.asyncio

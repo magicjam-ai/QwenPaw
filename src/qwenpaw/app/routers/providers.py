@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import subprocess
 from typing import Dict, List, Literal, Optional
 from fastapi import (
     APIRouter,
@@ -14,6 +17,7 @@ from fastapi import (
     Query,
     Request,
 )
+import httpx
 from pydantic import BaseModel, Field
 
 from agentscope_runtime.engine.schemas.exception import (
@@ -32,6 +36,14 @@ from ...config.config import ModelSlotConfig
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/models", tags=["models"])
+
+TRAE_PROVIDER_ID = "trae-cn"
+TRAE_CLI_CANDIDATES = ("traecli", "trae-cli", "trae")
+TRAE_PROXY_DEFAULTS = (
+    "http://127.0.0.1:20128/v1",
+    "http://127.0.0.1:3030/v1",
+    "http://127.0.0.1:11434/v1",
+)
 
 ChatModelName = Literal[
     "OpenAIChatModel",
@@ -56,6 +68,10 @@ async def get_provider_manager(request: Request) -> ProviderManager:
 
 
 class ProviderConfigRequest(BaseModel):
+    name: Optional[str] = Field(
+        default=None,
+        description="Optional display name for editable providers.",
+    )
     api_key: Optional[str] = Field(default=None)
     base_url: Optional[str] = Field(default=None)
     chat_model: Optional[ChatModelName] = Field(
@@ -103,6 +119,38 @@ class CreateCustomProviderRequest(BaseModel):
     api_key_prefix: str = Field(default="")
     chat_model: ChatModelName = Field(default="OpenAIChatModel")
     models: List[ModelInfo] = Field(default_factory=list)
+
+
+class CliCommandStatus(BaseModel):
+    installed: bool = Field(..., description="Whether the CLI command exists")
+    command: str = Field(..., description="Command name that was checked")
+    path: Optional[str] = Field(default=None, description="Resolved path")
+    version: Optional[str] = Field(default=None, description="Version output")
+    message: str = Field(default="", description="Human-readable status")
+
+
+class CliProxyStatus(BaseModel):
+    base_url: str = Field(..., description="OpenAI-compatible base URL")
+    healthy: bool = Field(..., description="Whether /models responded")
+    message: str = Field(default="", description="Probe status")
+
+
+class TraeCliStatusResponse(BaseModel):
+    cli: CliCommandStatus
+    proxies: List[CliProxyStatus] = Field(default_factory=list)
+    selected_base_url: Optional[str] = Field(default=None)
+
+
+class ConfigureTraeCliRequest(BaseModel):
+    base_url: Optional[str] = Field(
+        default=None,
+        description="OpenAI-compatible Trae proxy endpoint to register.",
+    )
+    model_id: str = Field(
+        default="trae-cli",
+        description="Model id to add when the proxy cannot be discovered yet.",
+    )
+    model_name: str = Field(default="Trae CLI")
 
 
 class AddModelRequest(BaseModel):
@@ -179,6 +227,106 @@ async def _load_agent_model(
     return agent_config.active_model
 
 
+def _run_version(command_path: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            [command_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    output = (completed.stdout or completed.stderr or "").strip()
+    return output.splitlines()[0].strip() if output else None
+
+
+def _detect_trae_cli() -> CliCommandStatus:
+    for command in TRAE_CLI_CANDIDATES:
+        path = shutil.which(command)
+        if path:
+            return CliCommandStatus(
+                installed=True,
+                command=command,
+                path=path,
+                version=_run_version(path),
+                message="Trae CLI command detected.",
+            )
+    return CliCommandStatus(
+        installed=False,
+        command=TRAE_CLI_CANDIDATES[0],
+        message="Trae CLI command was not found on PATH.",
+    )
+
+
+def _candidate_trae_proxy_urls() -> list[str]:
+    urls: list[str] = []
+    for value in (
+        os.environ.get("QWENPAW_TRAE_PROXY_BASE_URL"),
+        os.environ.get("QWENPAW_TRAE_CN_BASE_URL"),
+        os.environ.get("QWENPAW_CLI_PROXY_BASE_URL"),
+        *TRAE_PROXY_DEFAULTS,
+    ):
+        if value and value not in urls:
+            urls.append(value)
+    return urls
+
+
+async def _probe_openai_proxy(base_url: str) -> CliProxyStatus:
+    url = base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            response = await client.get(f"{url}/models")
+        if response.status_code < 500:
+            return CliProxyStatus(
+                base_url=base_url,
+                healthy=True,
+                message=f"HTTP {response.status_code}",
+            )
+        return CliProxyStatus(
+            base_url=base_url,
+            healthy=False,
+            message=f"HTTP {response.status_code}",
+        )
+    except httpx.HTTPError as exc:
+        return CliProxyStatus(
+            base_url=base_url,
+            healthy=False,
+            message=exc.__class__.__name__,
+        )
+
+
+async def _trae_cli_status() -> TraeCliStatusResponse:
+    proxies = [
+        await _probe_openai_proxy(base_url)
+        for base_url in _candidate_trae_proxy_urls()
+    ]
+    selected = next(
+        (proxy.base_url for proxy in proxies if proxy.healthy),
+        os.environ.get("QWENPAW_TRAE_PROXY_BASE_URL")
+        or os.environ.get("QWENPAW_TRAE_CN_BASE_URL"),
+    )
+    return TraeCliStatusResponse(
+        cli=_detect_trae_cli(),
+        proxies=proxies,
+        selected_base_url=selected,
+    )
+
+
+def _annotate_trae_provider(
+    provider: ProviderInfo,
+    status: TraeCliStatusResponse,
+) -> ProviderInfo:
+    if provider.id != TRAE_PROVIDER_ID:
+        return provider
+    meta = dict(provider.meta or {})
+    meta["cli_status"] = status.model_dump()
+    if status.selected_base_url:
+        meta["detected_base_url"] = status.selected_base_url
+    return provider.model_copy(update={"meta": meta})
+
+
 @router.get(
     "",
     response_model=List[ProviderInfo],
@@ -187,7 +335,78 @@ async def _load_agent_model(
 async def list_all_providers(
     manager: ProviderManager = Depends(get_provider_manager),
 ) -> List[ProviderInfo]:
-    return await manager.list_provider_info()
+    providers = await manager.list_provider_info()
+    status = await _trae_cli_status()
+    return [_annotate_trae_provider(provider, status) for provider in providers]
+
+
+@router.get(
+    "/trae-cn/cli/status",
+    response_model=TraeCliStatusResponse,
+    summary="Detect Trae CLI and local OpenAI-compatible proxy status",
+)
+async def get_trae_cli_status() -> TraeCliStatusResponse:
+    return await _trae_cli_status()
+
+
+@router.post(
+    "/trae-cn/cli/configure",
+    response_model=ProviderInfo,
+    summary="Configure Trae enterprise provider from local CLI proxy",
+)
+async def configure_trae_cli_provider(
+    manager: ProviderManager = Depends(get_provider_manager),
+    body: ConfigureTraeCliRequest = Body(...),
+) -> ProviderInfo:
+    status = await _trae_cli_status()
+    if not status.cli.installed:
+        raise HTTPException(
+            status_code=424,
+            detail=(
+                "Trae CLI command was not found. Install traecli or add it "
+                "to PATH, then retry."
+            ),
+        )
+
+    base_url = (
+        body.base_url
+        or status.selected_base_url
+        or TRAE_PROXY_DEFAULTS[0]
+    ).strip()
+    ok = manager.update_provider(
+        TRAE_PROVIDER_ID,
+        {
+            "name": "Trae 企业版",
+            "base_url": base_url,
+            "api_key": "",
+        },
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Provider '{TRAE_PROVIDER_ID}' not found",
+        )
+
+    provider = manager.get_provider(TRAE_PROVIDER_ID)
+    if provider is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Provider '{TRAE_PROVIDER_ID}' not found",
+        )
+    model_id = body.model_id.strip() or "trae-cli"
+    if not provider.has_model(model_id):
+        await manager.add_model_to_provider(
+            TRAE_PROVIDER_ID,
+            ModelInfo(id=model_id, name=body.model_name.strip() or model_id),
+        )
+
+    provider_info = await manager.get_provider_info(TRAE_PROVIDER_ID)
+    if provider_info is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Provider '{TRAE_PROVIDER_ID}' not found after update",
+        )
+    return _annotate_trae_provider(provider_info, status)
 
 
 @router.put(
@@ -203,6 +422,7 @@ async def configure_provider(
     ok = manager.update_provider(
         provider_id,
         {
+            "name": body.name,
             "api_key": body.api_key,
             "base_url": body.base_url,
             "chat_model": body.chat_model,

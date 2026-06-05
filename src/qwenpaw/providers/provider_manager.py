@@ -881,7 +881,7 @@ PROVIDER_MODELSIGHT = OpenAIProvider(
 
 PROVIDER_TRAE_CN = OpenAIProvider(
     id="trae-cn",
-    name="Trae CN Enterprise",
+    name="Trae 企业版",
     base_url=os.environ.get("QWENPAW_TRAE_CN_BASE_URL", ""),
     api_key_prefix=os.environ.get("QWENPAW_TRAE_CN_API_KEY_PREFIX", ""),
     models=[],
@@ -894,11 +894,28 @@ PROVIDER_TRAE_CN = OpenAIProvider(
         "scope": "company",
         "display_group": "company",
         "description": (
-            "Trae CN enterprise model endpoint. It is treated as an "
-            "OpenAI-compatible service so configured models can be used by "
-            "chat and agents directly."
+            "Trae enterprise model endpoint. When traecli or a local router "
+            "is available, QwenPaw can register it as an OpenAI-compatible "
+            "service so configured models can be used by chat and agents "
+            "directly."
         ),
         "base_url_env": "QWENPAW_TRAE_CN_BASE_URL",
+        "cli_command": "traecli",
+        "proxy_endpoint_env": "QWENPAW_TRAE_PROXY_BASE_URL",
+        "base_url_options": [
+            {
+                "label": "9Router / OmniRoute",
+                "value": "http://127.0.0.1:20128/v1",
+            },
+            {
+                "label": "CLIProxyAPI",
+                "value": "http://127.0.0.1:3030/v1",
+            },
+            {
+                "label": "Local OpenAI-compatible proxy",
+                "value": "http://127.0.0.1:11434/v1",
+            },
+        ],
     },
 )
 
