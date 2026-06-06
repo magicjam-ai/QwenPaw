@@ -337,7 +337,9 @@ async def list_all_providers(
 ) -> List[ProviderInfo]:
     providers = await manager.list_provider_info()
     status = await _trae_cli_status()
-    return [_annotate_trae_provider(provider, status) for provider in providers]
+    return [
+        _annotate_trae_provider(provider, status) for provider in providers
+    ]
 
 
 @router.get(
@@ -369,9 +371,7 @@ async def configure_trae_cli_provider(
         )
 
     base_url = (
-        body.base_url
-        or status.selected_base_url
-        or TRAE_PROXY_DEFAULTS[0]
+        body.base_url or status.selected_base_url or TRAE_PROXY_DEFAULTS[0]
     ).strip()
     ok = manager.update_provider(
         TRAE_PROVIDER_ID,

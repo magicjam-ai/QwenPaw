@@ -308,7 +308,11 @@ def test_parse_lark_auth_env_file_supports_bash_and_powershell(tmp_path):
 
 def test_message_should_collect_accepts_naive_message_time():
     assert _message_should_collect(
-        {"message_id": "msg-1", "text": "blocked", "create_time": "2026-06-05 10:30:00"},
+        {
+            "message_id": "msg-1",
+            "text": "blocked",
+            "create_time": "2026-06-05 10:30:00",
+        },
         "2026-06-05T00:00:00+08:00",
         "2026-06-06T00:00:00+08:00",
     )
@@ -316,7 +320,11 @@ def test_message_should_collect_accepts_naive_message_time():
 
 def test_message_should_collect_accepts_utc_z_message_time():
     assert _message_should_collect(
-        {"message_id": "msg-1", "text": "blocked", "create_time": "2026-06-05T02:30:00Z"},
+        {
+            "message_id": "msg-1",
+            "text": "blocked",
+            "create_time": "2026-06-05T02:30:00Z",
+        },
         "2026-06-05T00:00:00+08:00",
         "2026-06-06T00:00:00+08:00",
     )
@@ -397,9 +405,19 @@ def test_auth_check_python_argv_frozen_finds_external_python(monkeypatch):
 
     monkeypatch.delenv("LARK_AUTH_CHECK_PYTHON", raising=False)
     monkeypatch.delenv("QWENPAW_EXTERNAL_PYTHON", raising=False)
-    monkeypatch.setattr("qwenpaw.workbench.lark_collector.sys.frozen", True, raising=False)
-    monkeypatch.setattr("qwenpaw.workbench.lark_collector.shutil.which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr("qwenpaw.workbench.lark_collector.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "qwenpaw.workbench.lark_collector.sys.frozen",
+        True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "qwenpaw.workbench.lark_collector.shutil.which",
+        lambda name: f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(
+        "qwenpaw.workbench.lark_collector.subprocess.run",
+        fake_run,
+    )
 
     argv = _auth_check_python_argv()
 
