@@ -890,7 +890,8 @@ PROVIDER_MODELSIGHT = OpenAIProvider(
         "display_group": "company",
         "description": (
             "Company private OpenAI-compatible endpoint. Configure Base URL, "
-            "optional API key, discover or add models, then set a model active."
+            "optional API key, discover or add models, then set a model "
+            "active."
         ),
         "base_url_env": "QWENPAW_MODELSIGHT_BASE_URL",
     },
@@ -939,7 +940,10 @@ PROVIDER_TRAE_CN = OpenAIProvider(
 PROVIDER_CLI_PROXY = OpenAIProvider(
     id="cli-proxy",
     name="CLI Proxy API",
-    base_url=os.environ.get("QWENPAW_CLI_PROXY_BASE_URL", "http://127.0.0.1:3030/v1"),
+    base_url=os.environ.get(
+        "QWENPAW_CLI_PROXY_BASE_URL",
+        "http://127.0.0.1:3030/v1",
+    ),
     api_key_prefix=os.environ.get("QWENPAW_CLI_PROXY_API_KEY_PREFIX", ""),
     models=[],
     freeze_url=False,

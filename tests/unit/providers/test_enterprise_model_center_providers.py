@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Enterprise model-center built-in providers."""
 
+import pytest
+
 from qwenpaw.providers.openai_provider import OpenAIProvider
 from qwenpaw.providers.provider import ModelInfo
 from qwenpaw.providers.provider_manager import (
@@ -21,6 +23,8 @@ from qwenpaw.app.routers.providers import (
     ProviderConfigRequest,
 )
 
+pytestmark = pytest.mark.usefixtures("isolated_secret_dir")
+
 
 def test_enterprise_model_center_providers_are_openai_compatible() -> None:
     """Company/CLI model sources should use the existing callable stack."""
@@ -36,9 +40,7 @@ def test_enterprise_model_center_providers_are_openai_compatible() -> None:
         assert provider.support_connection_check is True
 
 
-def test_enterprise_model_center_providers_registered(
-    isolated_secret_dir,
-) -> None:
+def test_enterprise_model_center_providers_registered() -> None:
     """ProviderManager should expose the new model-center sources."""
     manager = ProviderManager()
 
@@ -54,10 +56,8 @@ def test_enterprise_model_center_providers_registered(
         assert provider.meta["source_type"] == source_type
 
 
-async def test_can_configure_add_model_and_activate_enterprise_provider(
-    isolated_secret_dir,
-) -> None:
-    """Configured company providers should become real callable active slots."""
+async def test_can_activate_enterprise_provider() -> None:
+    """Configured company providers should become callable active slots."""
     manager = ProviderManager()
 
     assert manager.update_provider(
@@ -87,9 +87,7 @@ async def test_can_configure_add_model_and_activate_enterprise_provider(
     assert reloaded.get_active_model().provider_id == "modelsight"
 
 
-async def test_provider_config_api_can_update_display_name(
-    isolated_secret_dir,
-) -> None:
+async def test_provider_config_api_can_update_display_name() -> None:
     manager = ProviderManager()
 
     updated = await configure_provider(
@@ -106,7 +104,6 @@ async def test_provider_config_api_can_update_display_name(
 
 
 async def test_list_providers_annotates_trae_cli_status(
-    isolated_secret_dir,
     monkeypatch,
 ) -> None:
     async def fake_status():
@@ -136,7 +133,6 @@ async def test_list_providers_annotates_trae_cli_status(
 
 
 async def test_configure_trae_cli_provider_registers_openai_proxy(
-    isolated_secret_dir,
     monkeypatch,
 ) -> None:
     async def fake_status():
